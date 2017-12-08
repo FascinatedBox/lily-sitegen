@@ -1,0 +1,140 @@
+import utils
+
+var sandbox_examples =
+[
+    [
+"Hello World",
+"""
+print("Hello World!")
+"""
+    ],
+    [
+"100 doors",
+"""
+var doors = List.repeat(100, false)
+
+for i in 0...99:
+    for j in i...99 by i + 1:
+        doors[j] = !doors[j]
+
+# The type must be specified since the List starts off empty.
+var open_doors: List[Integer] = []
+
+doors.each_index(|i|
+    if doors[i]:
+        open_doors.push(i + 1)
+)
+
+print("Open doors: {0}.".format(open_doors))
+"""
+    ],
+    [
+"Show off enums",
+"""
+enum TreeObject {
+    TreeValue(String),
+    TreeList(TreeObject...)
+
+    define as_string: String {
+        match self: {
+            case TreeValue(v):
+                return v
+
+            case TreeList(l):
+                var result = "["
+                var size = l.size() - 1
+
+                for i in 0...size: {
+                    result = "{0}{1}".format(result, l[i].as_string())
+                    if i != size:
+                        result = result ++ " "
+                }
+
+                return result ++ "]"
+        }
+    }
+}
+
+stdout.write("Here's a JSON-like enum value as a string: ")
+print(
+        TreeList(
+            TreeList(
+                TreeValue("abc"),
+                TreeValue("def")
+            ),
+            TreeValue("1"), 
+            TreeValue("2"),
+            TreeList(
+                TreeList(
+                    TreeValue("0")
+                )
+            )
+        ).as_string()
+    )
+"""
+    ],
+    [
+"RPN Calculator",
+"""
+var math_ops = ["+" => (|a: Integer, b: Integer| a + b),
+                "-" => (|a, b| a - b),
+                "*" => (|a, b| a * b),
+                "/" => (|a, b| a / b)]
+
+define rpn(input: String): Result[String, List[Integer]]
+{
+    var values = input.split(" ").reject(|r| r.is_space() )
+    var stack: List[Integer] = []
+
+    for i in 0...values.size() - 1: {
+        var v = values[i]
+        match v.parse_i(): {
+            case Some(number):
+                stack.push(number)
+            case None:
+                if stack.size() < 2:
+                    return Failure("Stack underflow.")
+
+                var right = stack.pop()
+                var left = stack.pop()
+                try: {
+                    var op_fn = math_ops[v]
+                    var op_value = op_fn(left, right)
+                    stack.push(op_value)
+                except KeyError:
+                    return Failure("Invalid operation {0}.".format(v))
+                except DivisionByZeroError:
+                    return Failure("Attempt to divide by zero.")
+                }
+        }
+    }
+
+    return Success(stack)
+}
+
+var lines = [
+    "1 2 3 4 * + -",
+    "2 2 2 2 * *",
+    "*",
+    "1 2 ?"
+    ]
+
+lines.each(|l| print("{0}: {1}".format(l, rpn(l)) ) )
+"""
+    ]
+] |> utils.stringify_sandbox_examples
+
+var nav = utils.read_all_from_file("template-nav.html")
+               .replace("><a href=\"intro-sandbox.html\">",
+                        " class=\"active\"><a href=\"intro-sandbox.html\">")
+
+var sandbox_body = utils.template_transform(
+    utils.read_all_from_file("gen_sandbox/template-sandbox.html"),
+    :page_title "Sandbox",
+    :page_nav   nav,
+    :page_body  sandbox_examples)
+
+print("Generating output/intro-sandbox.html.")
+
+utils.write_all_to_file(:path "output/intro-sandbox.html",
+                        :content sandbox_body)

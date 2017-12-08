@@ -1,0 +1,1339 @@
+#[
+parsekit
+========
+
+The base of parsekit is the `EngineCore`, which is able to parse Lily snippets.
+Those snippets are transformed into Json-like objects (see JsValue defined
+below).
+
+This file also includes `CSourceDriver`, which reads special `/** ... */`
+comments in a .c file. Those are then fed incrementally to `EngineCore`, with
+the driver returning the engine's tree root.
+]#
+
+class ParseError(message: String) < Exception(message) {  }
+class BlockError(var @line: Integer, message: String) < Exception(message) {  }
+
+# The first order of business is creating a lexer that understands enough of
+# Lily's tokenizing to be able to scan definitions.
+
+scoped enum Token {
+    Arrow,
+    Colon,
+    Comma,
+    Digit,
+    DollarSign,
+    Dot,
+    DoubleQuote,
+    EndOfFile,
+    Equal,
+    Keyarg,
+    LeftBracket,
+    LeftCurly,
+    LeftParenth,
+    Less,
+    Minus,
+    Multiply,
+    Newline,
+    PoundSign,
+    PropWord,
+    RightBracket,
+    RightCurly,
+    RightParenth,
+    Semicolon,
+    ThreeDots,
+    Word,
+    Invalid
+}
+
+var char_class = List.repeat(256, Token.Invalid)
+
+for i in 'a'.to_i()...'z'.to_i():
+    char_class[i] = Token.Word
+
+for i in 'A'.to_i()...'Z'.to_i():
+    char_class[i] = Token.Word
+
+for i in '0'.to_i()...'9'.to_i():
+    char_class[i] = Token.Digit
+
+char_class['@'.to_i()] = Token.PropWord
+char_class['_'.to_i()] = Token.Word
+char_class['['.to_i()] = Token.LeftBracket
+char_class[']'.to_i()] = Token.RightBracket
+char_class['('.to_i()] = Token.LeftParenth
+char_class[')'.to_i()] = Token.RightParenth
+char_class['{'.to_i()] = Token.LeftCurly
+char_class['}'.to_i()] = Token.RightCurly
+char_class[':'.to_i()] = Token.Colon
+char_class[';'.to_i()] = Token.Semicolon
+char_class[','.to_i()] = Token.Comma
+char_class['*'.to_i()] = Token.Multiply
+char_class['='.to_i()] = Token.Equal
+char_class['"'.to_i()] = Token.DoubleQuote
+char_class['-'.to_i()] = Token.Minus
+char_class['.'.to_i()] = Token.Dot
+char_class['<'.to_i()] = Token.Less
+char_class['$'.to_i()] = Token.DollarSign
+char_class['#'.to_i()] = Token.PoundSign
+char_class['\r'.to_i()] = Token.Newline
+char_class['\n'.to_i()] = Token.Newline
+
+class EngineScanner
+{
+    private var @source_bytes = B""
+    private var @source_pos = 0
+    private var @source = ""
+    private var @last_tok = Token.EndOfFile
+    private var @last_str = ""
+    public var @line_num = 0
+
+    public define set_source(new_source: String, offset: *Integer = 1) {
+        new_source = new_source ++ "\n"
+        @source = new_source
+        @source_bytes = new_source.to_bytestring()
+        @source_pos = 0
+        @line_num = offset
+    }
+
+    private define scan_comment_block: String {
+        var start = @source_pos
+
+        if @source_bytes[@source_pos + 1] != '#' ||
+           @source_bytes[@source_pos + 2] != '#':
+            raise ParseError("Docblocks must start with '###'.")
+
+        @source_pos += 2
+
+        var pending_lines: List[String] = []
+        var local_bytes = @source_bytes
+        var local_pos = @source_pos
+        var ch = ' '
+        var slice_start = local_pos + 1
+
+        while 1: {
+            ch = local_bytes[local_pos]
+            if ch == '\n': {
+                pending_lines.push(@source.slice(slice_start, local_pos))
+                @line_num += 1
+                local_pos += 1
+
+                while 1: {
+                    ch = local_bytes[local_pos]
+                    if ch != ' ' && ch != '\t':
+                        break
+
+                    local_pos += 1
+                }
+
+                if ch != '#': {
+                    break
+                elif local_bytes[local_pos + 1] != '#' ||
+                     local_bytes[local_pos + 2] != '#':
+                    raise ParseError(
+                            "Docblock line must start with a full '###'.")
+                else:
+                    local_pos += 2
+                    slice_start = local_pos + 1
+                }
+            }
+
+            local_pos += 1
+        }
+
+        @source_pos = local_pos
+
+        return pending_lines.map(|line| line.lstrip(" \t") ).join("\n")
+    }
+
+    public define next {
+        var result_tok = Token.EndOfFile
+        var result_str = ""
+
+        while 1: {
+            var ch = @source_bytes[@source_pos]
+
+            while ch == ' ' || ch == '\t': {
+                @source_pos += 1
+                ch = @source_bytes[@source_pos]
+            }
+
+            result_tok = char_class[ch.to_i()]
+
+            match result_tok: {
+                case Token.Word:
+                    var start = @source_pos
+                    var cc = char_class[ch.to_i()]
+
+                    while cc == Token.Word || cc == Token.Digit: {
+                        @source_pos += 1
+                        ch = @source_bytes[@source_pos]
+                        cc = char_class[ch.to_i()]
+                    }
+
+                    result_str = @source.slice(start, @source_pos)
+                case Token.LeftParenth:
+                    @source_pos += 1
+                case Token.RightParenth:
+                    @source_pos += 1
+                case Token.LeftBracket:
+                    @source_pos += 1
+                case Token.RightBracket:
+                    @source_pos += 1
+                case Token.LeftCurly:
+                    @source_pos += 1
+                case Token.RightCurly:
+                    @source_pos += 1
+                case Token.Colon:
+                    @source_pos += 1
+
+                    ch = @source_bytes[@source_pos]
+                    var cc = char_class[ch.to_i()]
+
+                    if cc == Token.Word || cc == Token.Digit: {
+                        calltrace().each(print)
+
+                        var start = @source_pos - 1
+
+                        while cc == Token.Word || cc == Token.Digit: {
+                            @source_pos += 1
+                            ch = @source_bytes[@source_pos]
+                            cc = char_class[ch.to_i()]
+                        }
+
+                        result_str = @source.slice(start, @source_pos)
+                        result_tok = Token.Keyarg
+                    }
+                case Token.Less:
+                    @source_pos += 1
+                case Token.Semicolon:
+                    @source_pos += 1
+                case Token.Comma:
+                    @source_pos += 1
+                case Token.Multiply:
+                    @source_pos += 1
+                case Token.Arrow:
+                    @source_pos += 1
+                case Token.Dot:
+                    @source_pos += 1
+
+                    if @source_bytes[@source_pos] == '.' &&
+                       @source_bytes[@source_pos + 1] == '.': {
+                       @source_pos += 2
+                       result_tok = Token.ThreeDots
+                    }
+
+                case Token.Equal:
+                    @source_pos += 1
+                    if @source_bytes[@source_pos] == '>': {
+                        result_tok = Token.Arrow
+                        @source_pos += 1
+                    }
+
+                case Token.Digit:
+                    var start = @source_pos
+                    var cc = char_class[ch.to_i()]
+
+                    while cc == Token.Digit: {
+                        @source_pos += 1
+                        ch = @source_bytes[@source_pos]
+                        cc = char_class[ch.to_i()]
+                    }
+
+                    result_str = @source.slice(start, @source_pos)
+                case Token.PropWord:
+                    @source_pos += 1
+                    ch = @source_bytes[@source_pos]
+
+                    var start = @source_pos
+                    var cc = char_class[ch.to_i()]
+
+                    while cc == Token.Word || cc == Token.Digit: {
+                        @source_pos += 1
+                        ch = @source_bytes[@source_pos]
+                        cc = char_class[ch.to_i()]
+                    }
+
+                    result_str = @source.slice(start, @source_pos)
+
+                    if result_str == "":
+                        result_tok = Token.Invalid
+                case Token.Minus:
+                    var start = @source_pos
+                    @source_pos += 1
+
+                    ch = @source_bytes[@source_pos]
+                    var cc = char_class[ch.to_i()]
+
+                    if cc == Token.Digit: {
+                        while cc == Token.Digit: {
+                            @source_pos += 1
+                            ch = @source_bytes[@source_pos]
+                            cc = char_class[ch.to_i()]
+                        }
+
+                        result_str = @source.slice(start, @source_pos)
+                        result_tok = Token.Digit
+                    }
+
+                case Token.DoubleQuote:
+                    var start = @source_pos
+
+                    @source_pos += 1
+                    ch = @source_bytes[@source_pos]
+
+                    while ch != '"': {
+                        @source_pos += 1
+                        ch = @source_bytes[@source_pos]
+                    }
+
+                    @source_pos += 1
+                    result_str = @source.slice(start, @source_pos)
+                case Token.DollarSign:
+                    ch = @source_bytes[@source_pos + 1]
+
+                    if ch != '1' && ch != '2':
+                        raise ParseError(
+                                "Invalid '$' marker, expected either $1 or $2.")
+
+                    @source_pos += 2
+
+                    result_str = "$" ++ (ch.to_i() - '0'.to_i()).to_s()
+                    result_tok = Token.Word
+                case Token.PoundSign:
+                    result_str = scan_comment_block()
+                case Token.Newline:
+                    if @source_pos == @source_bytes.size() - 1: {
+                        result_tok = Token.EndOfFile
+                        @source_pos -= 1
+                    else:
+                        @line_num += 1
+                        @source_pos += 1
+                        continue
+                    }
+                else:
+                    # The other token kinds aren't seeded into ch_class, and
+                    # therefore aren't possible to see here.
+            }
+
+            break
+        }
+
+        @last_tok = result_tok
+        @last_str = result_str
+    }
+
+    public define next_tok: Token {
+        next()
+        return @last_tok
+    }
+
+    public define current_tok: Token {
+        return @last_tok
+    }
+
+    public define current_str: String {
+        return @last_str
+    }
+
+    public define current_is(expected_token: Token): Boolean {
+        return @last_tok == expected_token
+    }
+
+    public define next_is(expected_token: Token): Boolean {
+        next()
+        return @last_tok == expected_token
+    }
+
+    public define expect(tok: Token) {
+        if @last_tok != tok: {
+            var got = "{0}".format(@last_tok)
+
+            if @last_tok == Token.Word:
+                got = "'{0}'".format(@last_tok)
+
+            raise ParseError("Expected {0}, not {1}.".format(tok, got))
+        }
+    }
+
+    public define expect_word(value: *String=""): String {
+        if @last_tok != Token.Word ||
+            (value != "" && @last_str != value):
+            raise ParseError(
+                    "Expected '{0}', not '{1}.".format(value, @last_tok))
+
+        return @last_str
+    }
+
+    public define expect_any(tokens: Token...) {
+        raise ParseError("Expected one of {0} but got {1}."
+                .format(tokens.map(|t| "{0}".format(t) ).join(", "), @last_tok))
+    }
+
+    public define require(tok: Token): String {
+        next()
+        expect(tok)
+        return @last_str
+    }
+
+    public define require_word(value: String): String {
+        next()
+        return expect_word(value)
+    }
+
+    # Returns a slice from the current position to the end.
+    #
+    # This returns a slice containing whatever is left in the scanner. This is
+    # used primarily to get the doc blocks that occur after commands.
+    #
+    # This doesn't modify the scanner's position.
+    public define strify_to_end: String {
+        return @source.slice(@source_pos)
+    }
+}
+
+enum JsObject {
+    JsBoolean(Boolean),
+    JsInteger(Integer),
+    JsString(String),
+    JsList(List[JsObject]),
+    JsHash(Hash[String, JsObject])
+
+    define as_boolean: Boolean {
+        match self: {
+            case JsBoolean(b):
+                return b
+            else:
+                return false
+        }
+    }
+
+    define as_integer: Integer {
+        match self: {
+            case JsInteger(i):
+                return i
+            else:
+                return 0
+        }
+    }
+
+    define as_hash: Hash[String, JsObject] {
+        match self: {
+            case JsHash(h):
+                return h
+            else:
+                return []
+        }
+    }
+
+    define as_list: List[JsObject] {
+        match self: {
+            case JsList(l):
+                return l
+            else:
+                return []
+        }
+    }
+
+    define as_string: String {
+        match self: {
+            case JsString(s):
+                return s
+            else:
+                return ""
+        }
+    }
+}
+
+# ClassSym instances are created for any class/enum, so that the symtab has a
+# way of finding them.
+class ClassSym(var @name: String, var @generics: Integer) {  }
+
+#[
+This is the raw engine that processes Lily statements, turning them into a tree
+of JsObject values.
+]#
+class EngineCore {
+    public var @pending_doc = ""
+    public var @scanner = EngineScanner()
+
+    private var @unit_type = [
+        "name" => "Unit" |> JsString
+    ] |> JsHash
+
+    private var @full_generic_names =
+        ["A", "B", "C", "D", "E", "Too many generics"]
+
+    private var @visible_generics: List[String] = []
+
+    private var @unit_type_obj = [
+        "class" => "Unit" |> JsString
+    ] |> JsHash
+
+    private var @self_obj = @unit_type_obj
+
+    public var @root_obj = [
+        "kind" => "module" |> JsString,
+        "doc" => "" |> JsString
+    ] |> JsHash
+
+    private var @current_obj = @root_obj
+
+    private var @classes = [
+        ClassSym("Integer", 0),
+        ClassSym("Double", 0),
+        ClassSym("String", 0),
+        ClassSym("Byte", 0),
+        ClassSym("ByteString", 0),
+        ClassSym("Boolean", 0),
+        ClassSym("Coroutine", 1),
+        ClassSym("Dynamic", 0),
+        ClassSym("Function", -1),
+        ClassSym("File", 0),
+        ClassSym("List", 1),
+        ClassSym("Hash", 2),
+        ClassSym("Tuple", -1),
+        ClassSym("Option", 1),
+        ClassSym("Result", 2),
+        ClassSym("Exception", 0),
+        ClassSym("IOError", 0),
+        ClassSym("KeyError", 0),
+        ClassSym("RuntimeError", 0),
+        ClassSym("ValueError", 0),
+        ClassSym("IndexError", 0),
+        ClassSym("DivisionByZeroError", 0),
+        ClassSym("AssertionError", 0),
+        ClassSym("$1", 0),
+        ClassSym("$2", 0)
+    ]
+
+    private var @generic_classes = [
+        ClassSym("A", 0),
+        ClassSym("B", 0),
+        ClassSym("C", 0),
+        ClassSym("D", 0),
+        ClassSym("E", 0)
+    ]
+
+    public define leave_scope {
+        @current_obj = @root_obj
+        @visible_generics = []
+    }
+
+    public define get_js_root: JsObject {
+        return @root_obj
+    }
+
+    public define push_field_elem(field_name: String, what: JsObject) {
+        var current_hash = @current_obj.as_hash()
+
+        try: {
+            current_hash[field_name].as_list().push(what)
+        except KeyError:
+            current_hash[field_name] = [what] |> JsList
+        }
+    }
+
+    public define new_scope(name: String, field_name: String): JsObject {
+        var h = [
+            "name" => name |> JsString,
+            "doc" => @pending_doc |> JsString
+        ] |> JsHash
+
+        push_field_elem(field_name, h)
+
+        @classes.push(ClassSym(name, 0))
+
+        # Make sure these are distinct, or inserting a function that uses self
+        # will cause a circular loop.
+
+        @self_obj = [
+            "class" => name |> JsString
+        ] |> JsHash
+
+        @current_obj = h
+
+        return @current_obj
+    }
+
+    private define scan_optarg_for(name: String): String {
+        var expect_tok = Token.Invalid
+
+        if name == "String": {
+            expect_tok = Token.DoubleQuote
+        elif name == "Integer":
+            expect_tok = Token.Digit
+        elif name == "Boolean":
+            expect_tok = Token.Word
+        }
+
+        @scanner.require(expect_tok)
+
+        return @scanner.current_str()
+    }
+
+    public define find_class(name: String): Option[ClassSym] {
+        var entry: Option[ClassSym] = None
+
+        for i in 0...@classes.size() - 1: {
+            var c = @classes[i]
+            if name == c.name: {
+                entry = Some(c)
+                break
+            }
+        }
+
+        if entry.is_none(): {
+            for i in 0...@visible_generics.size() - 1: {
+                if name == @visible_generics[i]: {
+                    entry = Some(@generic_classes[i])
+                    break
+                }
+            }
+        }
+
+        return entry
+    }
+
+    public define scan_type: JsObject {
+        var is_optarg = false
+        if @scanner.current_tok() == Token.Multiply: {
+            is_optarg = true
+            @scanner.next()
+        }
+
+        @scanner.expect(Token.Word)
+
+        var class_name = @scanner.current_str()
+        var entry = find_class(class_name)
+
+        if entry.is_none():
+            raise ParseError("Class '{0}' does not exist.".format(class_name))
+
+        var raw_class = entry.unwrap()
+        var args: List[JsObject] = []
+
+        var raw_type =
+            ["class" => class_name |> JsString]
+
+        if raw_class.generics == 0: {
+            0
+        elif raw_class.name != "Function":
+            @scanner.require(Token.LeftBracket)
+            var i = 0
+
+            while 1: {
+                @scanner.next()
+                args.push(scan_type())
+                i += 1
+
+                match @scanner.current_tok(): {
+                    case Token.Comma:
+                        continue
+                    case Token.RightBracket:
+                        break
+                    else:
+                        @scanner.expect_any(Token.Comma, Token.LeftBracket)
+                }
+            }
+
+            if i != raw_class.generics && raw_class.generics != -1: {
+                raise ParseError("Wrong number of types for {0} ({1} for {2})."
+                        .format(raw_class.name, i, raw_class.generics))
+            }
+        else:
+            @scanner.require(Token.LeftParenth)
+            args.push(@unit_type_obj)
+
+            @scanner.next()
+
+            if @scanner.current_tok() != Token.RightParenth &&
+               @scanner.current_tok() != Token.Arrow: {
+
+                while 1: {
+                    @scanner.expect(Token.Word)
+                    args.push(scan_type())
+
+                    if @scanner.current_tok() == Token.Comma: {
+                        @scanner.next()
+                        continue
+                    else:
+                        break
+                    }
+                }
+            }
+
+            if @scanner.current_tok() == Token.Arrow: {
+                @scanner.next()
+                args[0] = scan_type()
+            }
+
+            @scanner.expect(Token.RightParenth)
+        }
+
+        if is_optarg: {
+            @scanner.require(Token.Equal)
+            var opt_value = scan_optarg_for(raw_class.name)
+
+            raw_type["is_optarg"] = true |> JsBoolean
+            raw_type["value"] = opt_value |> JsString
+        elif args.size():
+            raw_type["children"] = args |> JsList
+        }
+
+        @scanner.next()
+
+        return raw_type |> JsHash
+    }
+
+    private define parse_generics_from(index: Integer): List[String] {
+        while 1: {
+            var generic_word = @scanner.require(Token.Word)
+
+            if generic_word != @full_generic_names[index]:
+                raise ParseError("Expected generic {0}, but got {1}."
+                        .format(@full_generic_names[index],
+                                generic_word))
+
+            index += 1
+            @scanner.next()
+
+            match @scanner.current_tok(): {
+                case Token.Comma:
+                    continue
+                case Token.RightBracket:
+                    break
+                else:
+                    @scanner.expect_any(Token.Comma, Token.RightBracket)
+            }
+        }
+
+        @scanner.next()
+
+        return @full_generic_names.slice(0, index)
+    }
+
+    public define parse_scope_generics(target: Hash[String, JsObject]) {
+        var g = parse_generics_from(0)
+
+        var class_name = target["name"].as_string()
+
+        var h = @self_obj.as_hash()
+
+        h["children"] = g.map(|m| [
+            "class" => m |> JsString
+        ] |> JsHash) |> JsList
+        target["generics"] = g.map(|m| m |> JsString) |> JsList
+
+        @classes[-1].generics = g.size()
+        @visible_generics = g
+    }
+
+    public define parse_define_body(source: Hash[String, JsObject]) {
+        var define_args: List[JsObject] = []
+
+        if source.has_key("is_static") == false &&
+           @current_obj.as_hash()["kind"].as_string() != "module": {
+            define_args.push(
+                ["name" => "self" |> JsString,
+                 "type" => @self_obj
+                ] |> JsHash)
+        }
+
+        var save_generics = @visible_generics
+
+        if @scanner.current_tok() == Token.LeftBracket:
+            @visible_generics = parse_generics_from(@visible_generics.size())
+
+        source["generics"] = @visible_generics.map(|x| x |> JsString) |> JsList
+
+        if @scanner.current_tok() == Token.LeftParenth: {
+            @scanner.next()
+
+            if @scanner.current_is(Token.RightParenth) &&
+               source.has_key("is_ctor"): {
+                @scanner.next()
+            else:
+                while 1: {
+                    var keyarg_name = ""
+
+                    if @scanner.current_is(Token.Keyarg): {
+                        keyarg_name = @scanner.current_str()
+                        @scanner.next()
+                    }
+
+                    @scanner.expect(Token.Word)
+                    var arg_name = @scanner.current_str()
+
+                    @scanner.require(Token.Colon)
+                    @scanner.next()
+
+                    var arg_type = scan_type()
+
+                    var arg =
+                        ["name" => JsString(arg_name),
+                         "type" => arg_type
+                        ] |> JsHash
+
+                    if keyarg_name: {
+                        var h = arg.as_hash()
+                        h["keyarg"] = keyarg_name |> JsString
+                    }
+
+                    define_args.push(arg)
+
+                    match @scanner.current_tok(): {
+                        case Token.Comma:
+                            @scanner.next()
+                        case Token.RightParenth:
+                            @scanner.next()
+                            break
+                        case Token.ThreeDots:
+                            var h = arg_type.as_hash()
+                            h["is_vararg"] = true |> JsBoolean
+
+                            @scanner.require(Token.RightParenth)
+                            @scanner.next()
+                            break
+                        else:
+                            @scanner.expect_any(Token.Comma, Token.RightParenth)
+                    }
+                }
+            }
+        }
+
+        source["args"] = define_args |> JsList
+
+        if source.has_key("is_ctor") == false: {
+            if @scanner.current_tok() == Token.Colon: {
+                @scanner.require(Token.Word)
+                source["output"] = scan_type()
+            else:
+                source["output"] = @unit_type_obj
+            }
+
+            source["doc"] = @pending_doc |> JsString
+        else:
+            source["output"] = @self_obj
+            source["doc"] = "" |> JsString
+        }
+
+        push_field_elem("functions", source |> JsHash)
+
+        @visible_generics = save_generics
+    }
+
+    public define parse_constructor {
+        parse_define_body(
+            ["name" => "<new>" |> JsString,
+             "is_static" => true |> JsBoolean,
+             "is_ctor" => true |> JsBoolean
+            ])
+    }
+
+    public define parse_variant_args: JsObject {
+        var variant_args: List[JsObject] = []
+        @scanner.next()
+
+        while 1: {
+            var keyarg_name = ""
+
+            if @scanner.current_is(Token.Keyarg): {
+                keyarg_name = @scanner.current_str()
+                @scanner.next()
+            }
+
+            @scanner.expect(Token.Word)
+
+            var arg_hash = [
+                "name" => "" |> JsString,
+                "type" => scan_type()
+            ] |> JsHash
+
+            if keyarg_name: {
+                var h = arg_hash.as_hash()
+                h["keyarg"] = keyarg_name |> JsString
+            }
+
+            variant_args.push(arg_hash)
+
+            match @scanner.current_tok(): {
+                case Token.Comma:
+                    continue
+                case Token.RightParenth:
+                    @scanner.next()
+                    break
+                else:
+                    @scanner.expect_any(Token.Comma, Token.RightParenth)
+            }
+        }
+
+        return variant_args |> JsList
+    }
+}
+
+class CSourceDriver(engine: EngineCore) {
+    private var @engine = engine
+    private var @scanner = engine.scanner
+    private var @lines: List[String] = []
+    private var @read_pos = 0
+    private var @read_end_pos = 0
+
+    private var @root_name = ""
+
+    private var @current_scope_name = ""
+
+    private define read_block_from(start: Integer): Boolean
+    {
+        var empty_line_pos = -1
+
+        for current in start...@read_end_pos: {
+            var line = @lines[current]
+
+            if line == "*/": {
+                var found = false
+                var j = -1
+
+                for j in start + 1...@read_end_pos: {
+                    line = @lines[j]
+                    if line == "": {
+                        found = true
+                        break
+                    }
+                }
+
+                if found == false:
+                    raise BlockError(start - 1,
+                    "Block has no blank dividing line.")
+
+                var command = @lines.slice(start, j + 1).join("\n")
+                var doc = @lines.slice(j, current).join("\n")
+                var line_num = start
+
+                @scanner.set_source(command, line_num)
+                @engine.pending_doc = doc
+                @read_pos = current + 1
+
+                return true
+            }
+        }
+
+        raise BlockError(start - 1, "Block is unterminated.")
+    }
+
+    public define read_next: Boolean {
+        var i = @read_pos
+        var end = @read_end_pos
+
+        while i < end: {
+            if @lines[i] == "/**": {
+                read_block_from(i + 1)
+                return true
+            }
+
+            i += 1
+        }
+
+        return false
+    }
+
+    private define get_scope_name: String {
+        var name = @engine.scanner.require(Token.Word)
+        if @current_scope_name != "":
+            @engine.leave_scope()
+
+        @current_scope_name = name
+        return name
+    }
+
+    private define leave_scope {
+        @current_scope_name = ""
+        @engine.leave_scope()
+    }
+
+    # The members of the layout section will later become members of the wrapper
+    # struct that bindgen creates. LILY_FOREIGN_HEADER is a macro that will
+    # add common fields that foreign objects need.
+    private define parse_foreign_layout(source: Hash[String, JsObject]) {
+        var entry = ""
+
+        @scanner.next()
+        var last_token = Token.Invalid
+        var args: List[JsObject] = ["LILY_FOREIGN_HEADER" |> JsString]
+
+        while 1: {
+            match @scanner.current_tok(): {
+                case Token.Word:
+                    if last_token == Token.Word:
+                        entry = entry ++ " " ++ @scanner.current_str()
+                    else:
+                        entry = entry ++ @scanner.current_str()
+                case Token.LeftBracket:
+                    entry = entry ++ "["
+                case Token.RightBracket:
+                    entry = entry ++ "]"
+                case Token.Multiply:
+                    if last_token == Token.Word:
+                        entry = entry ++ " *"
+                    else:
+                        entry = entry ++ "*"
+                case Token.Semicolon:
+                    args.push((entry ++ ";") |> JsString)
+
+                    if @scanner.next_is(Token.RightCurly): {
+                        break
+                    else:
+                        last_token = Token.Semicolon
+                        entry = ""
+                        continue
+                    }
+
+                else:
+                    raise ParseError("Unexpected token {0} in layout block."
+                    .format(@scanner.current_tok()))
+            }
+
+            last_token = @scanner.current_tok()
+
+            @scanner.next()
+        }
+
+        source["fields"] = args |> JsList
+    }
+
+    private define parse_members_for(source: Hash[String, JsObject]) {
+        @scanner.next()
+
+        var members: List[JsObject] = []
+
+        while 1: {
+            var word = @scanner.expect_word()
+            var raw_var: Hash[String, JsObject] = []
+            var qual = "public"
+
+            if word == "private": {
+                qual = "private"
+                @scanner.next()
+            elif word == "protected":
+                qual = "protected"
+                @scanner.next()
+            }
+
+            @scanner.expect_word("var")
+
+            raw_var["qualifier"] = qual |> JsString
+            raw_var["name"] = @scanner.require(Token.PropWord) |> JsString
+
+            @scanner.require(Token.Colon)
+            @scanner.next()
+
+            raw_var["type"] = @engine.scan_type()
+            members.push(raw_var |> JsHash)
+
+            if @scanner.current_is(Token.Comma): {
+                @scanner.next()
+                continue
+            elif @scanner.current_is(Token.RightCurly):
+                break
+            else:
+                @scanner.expect_any(Token.Comma, Token.RightCurly)
+            }
+        }
+
+        source["properties"] = members |> JsList
+    }
+
+    private define cmd_library {
+        @root_name = @scanner.require(Token.Word)
+
+        var root = @engine.root_obj.as_hash()
+
+        root["name"] = @root_name |> JsString
+        root["doc"] = @engine.pending_doc |> JsString
+        @scanner.next()
+    }
+
+    private define cmd_foreign {
+        @scanner.require_word("class")
+
+        var name = get_scope_name()
+        var boxed_class = @engine.new_scope(name, "containers")
+        var raw_class = boxed_class.as_hash()
+
+        raw_class["kind"] = "foreign" |> JsString
+
+        if @scanner.next_is(Token.LeftParenth):
+            @engine.parse_constructor()
+
+        @scanner.expect(Token.LeftCurly)
+        @scanner.require_word("layout")
+        @scanner.require(Token.LeftCurly)
+
+        parse_foreign_layout(raw_class)
+
+        @scanner.require(Token.RightCurly)
+        @scanner.next()
+    }
+
+    private define cmd_builtin {
+        if @root_name != "builtin":
+            raise ParseError("'builtin' strictly for the builtin package.")
+
+        @scanner.require_word("class")
+        var name = get_scope_name()
+
+        var boxed_class = @engine.find_class(name)
+        if boxed_class.is_none():
+            raise ParseError("Builtin class {0} not found.".format(name))
+
+        var raw_class = boxed_class.unwrap()
+        var boxed_obj = @engine.new_scope(raw_class.name, "containers")
+        var raw_obj = boxed_obj.as_hash()
+
+        raw_obj["kind"] = "builtin" |> JsString
+
+        @scanner.next()
+        if @scanner.current_is(Token.LeftBracket): {
+            if raw_class.name != "Dynamic":
+                @engine.parse_scope_generics(raw_obj)
+            else:
+                # Dynamic is the only class with a constructor, and the generics
+                # that it uses don't belong to the class.
+                @engine.parse_constructor()
+        }
+    }
+
+    private define cmd_native {
+        @scanner.require_word("class")
+        var name = get_scope_name()
+        var boxed_class = @engine.new_scope(name, "containers")
+        var raw_class = boxed_class.as_hash()
+
+        raw_class["kind"] = "native" |> JsString
+
+        if @scanner.next_is(Token.LeftBracket):
+            @engine.parse_scope_generics(raw_class)
+
+        if @scanner.current_is(Token.LeftParenth) == false &&
+           @scanner.current_is(Token.LeftCurly):
+            @scanner.expect_any(Token.LeftParenth, Token.LeftCurly)
+
+        @engine.parse_constructor()
+
+        if @scanner.current_is(Token.Less): {
+            raw_class["parent"] = @scanner.require(Token.Word) |> JsString
+            @scanner.next()
+        }
+
+        if @scanner.current_is(Token.LeftCurly): {
+            parse_members_for(raw_class)
+            @scanner.next()
+        }
+    }
+
+    private define cmd_enum(is_scoped: *Boolean = false) {
+        if is_scoped == true:
+            @scanner.require_word("enum")
+
+        var name = get_scope_name()
+
+        var boxed_enum = @engine.new_scope(name, "containers")
+
+        var raw_enum = boxed_enum.as_hash()
+
+        if is_scoped:
+            raw_enum["is_scoped"] = is_scoped |> JsBoolean
+
+        raw_enum["kind"] = "enum" |> JsString
+
+        if @scanner.next_is(Token.LeftBracket):
+            @engine.parse_scope_generics(raw_enum)
+
+        @scanner.expect(Token.LeftCurly)
+        @scanner.next()
+
+        var variant_entry_list: List[JsObject] = []
+
+        while 1: {
+            var new_variant_hash: Hash[String, JsObject] = []
+
+            new_variant_hash["name"] = @scanner.expect_word() |> JsString
+
+            if @scanner.next_is(Token.LeftParenth):
+                new_variant_hash["args"] = @engine.parse_variant_args()
+
+            variant_entry_list.push(new_variant_hash |> JsHash)
+
+            if @scanner.current_is(Token.Comma):
+                @scanner.next()
+            elif @scanner.current_is(Token.RightCurly):
+                break
+            else:
+                @scanner.expect_any(Token.Comma, Token.RightCurly)
+        }
+
+        raw_enum["variants"] = variant_entry_list |> JsList
+
+        @scanner.next()
+    }
+
+    private define cmd_define(qual: *String="") {
+        var raw_define: Hash[String, JsObject] = []
+
+        if qual != "": {
+            if qual == "private": {
+                raw_define["qualifier"] = "private" |> JsString
+            elif qual == "protected":
+                raw_define["qualifier"] = "protected" |> JsString
+            elif qual == "static":
+                raw_define["is_static"] = true |> JsBoolean
+            }
+            @scanner.next()
+        elif @current_scope_name != "":
+            raw_define["qualifier"] = "public" |> JsString
+        }
+
+        var name = @scanner.require(Token.Word)
+
+        if name == @current_scope_name: {
+            @scanner.require(Token.Dot)
+            name = @scanner.require(Token.Word)
+        }
+
+        raw_define["name"] = name |> JsString
+
+        @scanner.next()
+
+        @engine.parse_define_body(raw_define)
+    }
+
+    private define cmd_var {
+        if @current_scope_name != "root":
+            leave_scope()
+
+        var name = @scanner.require(Token.Word)
+
+        var raw_var =
+        ["name" => name |> JsString,
+         "doc" => @engine.pending_doc |> JsString]
+
+        @scanner.require(Token.Colon)
+        @scanner.require(Token.Word)
+
+        raw_var["type"] = @engine.scan_type()
+        @engine.push_field_elem("vars", raw_var |> JsHash)
+    }
+
+    private define cmd_package_files {
+        if @root_name != "core":
+            raise ParseError("'PackageFiles' strictly for the core package.")
+
+        var paths = @scanner.strify_to_end()
+                            .split("\n")
+                            .map(|m| m.strip(" ") )
+                            .reject(|s| s == "" )
+                            .map(|m| JsString(m) )
+                            |> JsList
+        var root = @engine.root_obj.as_hash()
+
+        root["paths"] = paths
+        # So that this command ends with EOF.
+        @scanner.set_source("")
+        @scanner.next()
+    }
+
+    private define parse_block {
+        var command = @scanner.require(Token.Word)
+
+        if command == "define":
+            cmd_define()
+        elif command == "foreign":
+            cmd_foreign()
+        elif command == "native":
+            cmd_native()
+        elif command == "enum":
+            cmd_enum()
+        elif command == "protected":
+            cmd_define("protected")
+        elif command == "private":
+            cmd_define("private")
+        elif command == "static":
+            cmd_define("static")
+        elif command == "var":
+            cmd_var()
+        elif command == "builtin":
+            cmd_builtin()
+        elif command == "scoped":
+            cmd_enum(true)
+        elif command == "library":
+            cmd_library()
+        elif command == "PackageFiles":
+            cmd_package_files()
+        else:
+            raise ParseError("Unknown command '{0}'.".format(command))
+
+        @scanner.expect(Token.EndOfFile)
+    }
+
+    private define read_blocks: Result[Tuple[String, Integer], JsObject] {
+        try: {
+            while read_next():
+                parse_block()
+        except ParseError as e:
+            return Failure(<[e.message, @scanner.line_num]>)
+        except BlockError as e:
+            return Failure(<[e.message, e.line]>)
+        }
+
+        return Success(@engine.root_obj)
+    }
+
+    public define process_lines(to_read: List[String])
+        : Result[Tuple[String, Integer], JsObject]
+    {
+        @lines = to_read
+        @read_end_pos = to_read.size() - 1
+
+        return read_blocks()
+    }
+
+    public define process_file(filename: String)
+        : Result[Tuple[String, Integer], JsObject]
+    {
+        var local_lines: List[String] = []
+
+        var f = File.open(filename, "r")
+        f.each_line(|l| l.encode().unwrap() |> local_lines.push )
+        f.close()
+
+        @lines = local_lines
+        @read_end_pos = local_lines.size() - 1
+
+        var result = read_blocks()
+
+        if result.is_success() && @root_name == "core": {
+            var split_base_dir = filename.split("/")
+
+            split_base_dir[-1] = ""
+
+            var base_dir = split_base_dir.join("/")
+            var root = result.success().unwrap().as_hash()
+            var paths = root["paths"].as_list()
+            var modules: List[JsObject] = []
+
+            for i in 0...paths.size() - 1: {
+                var driver = CSourceDriver(EngineCore())
+
+                driver.process_file(base_dir ++ paths[i].as_string())
+                      .success()
+                      .unwrap()
+                      |> modules.push
+            }
+
+            root["modules"] = modules |> JsList
+            root.delete("paths")
+        }
+
+        return result
+    }
+}

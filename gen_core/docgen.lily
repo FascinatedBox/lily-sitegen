@@ -1,0 +1,828 @@
+# Located at FascinatedBox/lily-mkdir
+# Use this until a proper filesystem package exists.
+import mkdir
+import parsekit
+import sys
+import utils
+
+var template_body = utils.read_all_from_file("gen_core/template-core.html")
+
+define field_to_boolean(source: Hash[String, parsekit.JsObject], field: String)
+    : Boolean
+{
+    try:
+        return source[field].as_boolean()
+    except KeyError:
+        return false
+
+    return false
+}
+
+define field_to_list(source: Hash[String, parsekit.JsObject], field: String)
+    : List[parsekit.JsObject]
+{
+    try:
+        return source[field].as_list()
+    except KeyError:
+        return []
+
+    return []
+}
+
+define field_to_string(
+    source: Hash[String, parsekit.JsObject],
+    field: String)
+    : String
+{
+    try:
+        return source[field].as_string()
+    except KeyError:
+        return ""
+
+    return ""
+}
+
+# todo: Instead of raising an error when rendering fails, have start_docgen
+#       push back an error structure instead.
+class RenderError(message: String) < Exception(message) {  }
+
+class ModuleDocState(
+    var @root: Hash[String, parsekit.JsObject],
+    var @base_dir: String,
+    var @style_dir: String,
+    var @prefix: String)
+{
+    private var @lines: List[String] = []
+
+    private var @class_decls: List[String] = []
+    private var @enum_decls: List[String] = []
+
+    public define load_decls {
+        var containers = field_to_list(@root, "containers")
+
+        for i in 0...containers.size() - 1: {
+            var c = containers[i].as_hash()
+            var kind = c["kind"].as_string()
+            var name = c["name"].as_string()
+
+            if kind != "enum":
+                @class_decls.push(name)
+            else:
+                @enum_decls.push(name)
+        }
+    }
+
+    public define has_class(name: String): Boolean {
+        for i in 0...@class_decls.size() - 1:
+            if @class_decls[i] == name:
+                return true
+
+        return false
+    }
+
+    public define has_enum(name: String): Boolean {
+        for i in 0...@enum_decls.size() - 1:
+            if @enum_decls[i] == name:
+                return true
+
+        return false
+    }
+
+    public define find_class_obj(name: String)
+        : Hash[String, parsekit.JsObject]
+    {
+        var classes = field_to_list(@root, "classes")
+
+        for i in 0...classes.size() - 1: {
+            var c = classes[i].as_hash()
+            var class_name = c["name"].as_string()
+            if class_name == name:
+                return c
+        }
+
+        # todo: The parsekit base should verify parent lineage
+        raise RuntimeError("Could not find parent class '{0}'.".format(name))
+    }
+
+    public define push(input: String) { @lines.push(input) }
+
+    public define generate_for(object: Hash[String, parsekit.JsObject]) {
+        var name = object["name"].as_string()
+        var kind = object["kind"].as_string()
+        var title = ""
+
+        if kind != "module": {
+            # Native or foreign shouldn't matter to documentation output.
+            if kind == "foreign" || kind == "native":
+                kind = "class"
+
+            title = @root["name"].as_string() ++ "." ++ name
+        else:
+            title = name
+        }
+
+        var file_name = @base_dir ++ kind ++ "." ++ name ++ ".html"
+
+        var content = utils.template_transform(
+                template_body,
+                :page_title title,
+                :page_nav "",
+                :page_body @lines.join("\n"))
+
+        if name == "core":
+            content = content.replace("../../", "../")
+
+        print("Generating {0}.".format(file_name))
+        utils.write_all_to_file(file_name, content)
+
+        @lines = []
+    }
+}
+
+define run_each(
+    source: Hash[String, parsekit.JsObject],
+    field: String,
+    fn: Function(Hash[String, parsekit.JsObject]))
+{
+    var entries = field_to_list(source, field)
+
+    for i in 0...entries.size() - 1:
+        entries[i].as_hash() |> fn
+}
+
+define render_plain_type(source: Hash[String, parsekit.JsObject])
+    : String
+{
+    var name = source["class"].as_string()
+    var args = field_to_list(source, "children")
+                .map(|m| m.as_hash() |> render_plain_type )
+    var out = name
+
+    if name == "Function": {
+        var func_out = args[0]
+        var inputs = args.slice(1, args.size()).join(", ")
+
+        if func_out != "Unit":
+            func_out = " => " ++ func_out 
+        else:
+            func_out = ""
+
+        out = out ++ "(" ++ inputs ++ func_out ++ ")"
+    elif source.has_key("is_optarg"):
+        out = "*" ++ out ++ " = " ++ source["value"].as_string()
+    elif args.size():
+        out = out ++ "[" ++ args.join(", ") ++ "]"
+    }
+
+    if source.has_key("is_vararg"):
+        out = out ++ "..."
+
+    return out
+}
+
+define render_linked_type(
+    state: ModuleDocState,
+    source: Hash[String, parsekit.JsObject])
+    : String
+{
+    var name = source["class"].as_string()
+    var child_list = field_to_list(source, "children")
+    var args: List[String] = []
+
+    for i in 0...child_list.size() - 1: {
+        var child = child_list[i].as_hash()
+        render_linked_type(state, child) |> args.push
+    }
+
+    var out = name
+    if state.has_class(out):
+        out = "<a href='class.{0}.html'>{0}</a>".format(name)
+    elif state.has_enum(out):
+        out = "<a href='enum.{0}.html'>{0}</a>".format(name)
+
+    if name == "Function": {
+        var func_out = args[0]
+        var inputs = args.slice(1, args.size()).join(", ")
+
+        if func_out != "Unit":
+            func_out = " => " ++ func_out 
+        else:
+            func_out = ""
+
+        out = out ++ "(" ++ inputs ++ func_out ++ ")"
+    elif source.has_key("is_optarg"):
+        out = "*" ++ out ++ " = " ++ source["value"].as_string()
+    elif args.size():
+        out = out ++ "[" ++ args.join(", ") ++ "]"
+    }
+
+    if source.has_key("is_vararg"):
+        out = out ++ "..."
+
+    return out
+}
+
+define render_args(
+    state: ModuleDocState,
+    input: Hash[String, parsekit.JsObject])
+    : String
+{
+    var out: List[String] = []
+    var args = field_to_list(input, "args")
+    var start = 0
+
+    if input.has_key("qualifier") &&
+       field_to_boolean(input, "is_static") == false:
+        start = 1
+
+    for i in start...args.size() - 1: {
+        var arg = args[i].as_hash()
+        var name = arg["name"].as_string()
+        var type_string = render_linked_type(state, arg["type"].as_hash())
+
+        if arg.has_key("keyarg"):
+            name = arg["keyarg"].as_string() ++ " " ++ name
+
+        out.push(name ++ ": " ++ type_string)
+    }
+
+    var out_text = out.join(", ")
+    var return_type = render_linked_type(state, input["output"].as_hash())
+
+    if out_text:
+        out_text = "(" ++ out_text ++ ")"
+
+    if return_type != "Unit":
+        out_text = out_text ++ ": " ++ return_type
+
+    return out_text
+}
+
+define render_property(obj: Hash[String, parsekit.JsObject])
+    : String
+{
+    var name = obj["name"].as_string()
+    var qual = obj["qualifier"].as_string()
+    var type_str = render_plain_type(obj["type"].as_hash())
+
+    if qual == "public":
+        qual = ""
+    else:
+        qual = qual ++ " "
+
+    return "    {0}var @{1}: {2}".format(qual, name, type_str)
+}
+
+define write_properties_from(
+    state: ModuleDocState,
+    class_obj: Hash[String, parsekit.JsObject])
+{
+    var is_top = true
+
+    while 1: {
+        var properties = field_to_list(class_obj, "properties")
+
+        for i in 0...properties.size() - 1:
+            properties[i].as_hash()
+            |> render_property
+            |> state.push
+
+        var parent_name = field_to_string(class_obj, "parent")
+
+        if parent_name: {
+            if (is_top && properties.size()) ||
+                is_top == false:
+                state.push("")
+
+            var parent_obj = state.find_class_obj(parent_name)
+
+            class_obj = parent_obj
+            is_top = false
+            state.push("    # From " ++ parent_obj["name"].as_string())
+
+            continue
+        else:
+            break
+        }
+    }
+}
+
+define write_variants(
+    state: ModuleDocState,
+    enum_obj: Hash[String, parsekit.JsObject])
+{
+    var variant_list = enum_obj["variants"].as_list()
+    var last = variant_list.size() - 1
+
+    for i in 0...variant_list.size() - 1: {
+        var variant = variant_list[i].as_hash()
+        var name = variant["name"].as_string()
+        var arg_str = field_to_list(variant, "args")
+                        .map(|m|
+                            var h = m.as_hash()["type"].as_hash()
+                            render_plain_type(h)
+                        )
+                        .join(", ")
+
+        if variant.has_key("keyarg"):
+            name = variant["keyarg"].as_string() ++ " " ++ name
+
+        if arg_str:
+            arg_str = "(" ++ arg_str ++ ")"
+
+        var out = "    {0}{1}".format(name, arg_str)
+
+        if i != last:
+            out = out ++ ","
+
+        state.push(out)
+    }
+}
+
+define html_escape(input_line: String): String
+{
+    var out_cache: List[String] = []
+    var pending_out = ""
+    var raw_line = input_line.to_bytestring()
+    var should_slice = false
+    var pos = 0
+    var slice_start = 0
+    var to_push = ""
+
+    for pos in 0...raw_line.size() - 1: {
+        var ch = raw_line[pos]
+        if ch == '&': {
+            should_slice = true
+            to_push = "&amp;"
+        elif ch == '<':
+            should_slice = true
+            to_push = "&lt;"
+        elif ch == '>':
+            should_slice = true
+            to_push = "&gt;"
+        elif ch == '"':
+            should_slice = true
+            to_push = "&quot;"
+        elif ch == '\'':
+            should_slice = true
+            to_push = "&#39;"
+        }
+
+        if should_slice: {
+            out_cache.push(input_line.slice(slice_start, pos))
+            out_cache.push(to_push)
+            should_slice = false
+            slice_start = pos + 1
+        }
+    }
+
+    input_line.slice(slice_start) |> out_cache.push
+    return out_cache.join()
+}
+
+define render_one_doc_line(input_line: String): String
+{
+    var out_cache: List[String] = []
+    var pending_out = ""
+    var raw_line = input_line.to_bytestring()
+    var in_backtick = false
+    var should_slice = false
+    var pos = 0
+    var slice_start = 0
+    var to_push = ""
+
+    for pos in 0...raw_line.size() - 1: {
+        var ch = raw_line[pos]
+        if ch == '`': {
+            if in_backtick == false: {
+                should_slice = true
+                to_push = "<code>"
+                in_backtick = true
+            else:
+                should_slice = true
+                to_push = "</code>"
+                in_backtick = false
+            }
+        elif ch == '&':
+            should_slice = true
+            to_push = "&amp;"
+        elif ch == '<':
+            should_slice = true
+            to_push = "&lt;"
+        elif ch == '>':
+            should_slice = true
+            to_push = "&gt;"
+        elif ch == '"':
+            should_slice = true
+            to_push = "&quot;"
+        elif ch == '\'':
+            should_slice = true
+            to_push = "&#39;"
+        }
+
+        if should_slice: {
+            out_cache.push(input_line.slice(slice_start, pos))
+            out_cache.push(to_push)
+            should_slice = false
+            slice_start = pos + 1
+        }
+    }
+
+    if in_backtick:
+        raise RenderError("Uneven number of quote marks in: {0}."
+                .format(input_line))
+
+    input_line.slice(slice_start) |> out_cache.push
+    return out_cache.join()
+}
+
+#[
+This implements a very small set of markdown, plus a couple of special markups.
+
+It works by splitting along totally blank lines and then assuming that what's
+united by only a single newline is part of a whole block.
+
+It has basic support for a bulleted list, replaces backticks with code tags,
+replaces html characters, and has some special section markers.
+
+Even though it's a small subset, it's enough for the moment. Eventually, it
+should be replaced with a real markdown processor (as long as the special
+sections can be kept).
+]#
+define render_doc(
+    boxed_doc: parsekit.JsObject,
+    name: String)
+    : String
+{
+    var input_lines = boxed_doc.as_string().split("\n\n")
+    var result_list: List[String] = []
+    var is_fenced = false
+
+    for i in 0...input_lines.size() - 1: {
+        var input = input_lines[i]
+        var out_line = ""
+
+        if input.starts_with("```") &&
+           input.ends_with("```"): {
+            # Assume that fenced code blocks have ``` on lines by themselves.
+            # Cut by 4 instead of 3 to omit the leading+trailing newlines.
+
+            input = input.slice(4, -4)
+            out_line = "<pre>" ++
+                        html_escape(input.slice(4, -4)) ++
+                       "</pre>"
+            result_list.push(out_line)
+
+            continue
+        }
+
+        out_line = render_one_doc_line(input)
+
+        if out_line.starts_with("*"): {
+            var list_lines = out_line.split("\n")
+
+            out_line = out_line.split("\n")
+                        .select(|s| s.starts_with("*") )
+                        .map(|m| "<li>" ++ m.slice(1).lstrip(" ") ++ "</li>\n" )
+                        .join()
+
+            out_line = "<ul>\n" ++ out_line ++ "</ul>"
+        elif out_line.starts_with("#"):
+            if out_line == "# Errors": {
+                # Assume there's only one of these, and that it will be followed
+                # by a bulleted list of errors and what raises them.
+                out_line = ("<div class='linkblock' id='errors.{0}'>" ++
+                            "<a href='#errors.{0}'>Errors</a>" ++
+                            "</div>")
+                           .format(name)
+            elif out_line == "# Examples":
+                # This assumes only one 'example' section per doc block.
+                # This should be followed by a fenced code block.
+                # Having multiple single-line examples in the block is
+                # encouraged.
+                out_line = ("<div class='linkblock' id='examples.{0}'>" ++
+                            "<a href='#examples.{0}'>Examples</a>" ++
+                            "</div>")
+                           .format(name)
+            else:
+                out_line = "<p>" ++ out_line ++ "</p>"
+            }
+        else:
+            out_line = "<p>" ++ out_line ++ "</p>"
+        }
+
+        result_list.push(out_line)
+    }
+
+    return result_list.join("\n")
+}
+
+define write_children(
+    state: ModuleDocState,
+    obj: Hash[String, parsekit.JsObject],
+    field_name: String,
+    title: String,
+    fn: Function(ModuleDocState,
+                 Hash[String, parsekit.JsObject],
+                 Hash[String, parsekit.JsObject]))
+{
+    if obj.has_key(field_name): {
+        state.push("<h2>" ++ title ++ "</h2>")
+        var child_list = field_to_list(obj, field_name)
+        for i in 0...child_list.size() - 1:
+            fn(state, obj, child_list[i].as_hash())
+    }
+}
+
+define write_var(
+    state: ModuleDocState,
+    parent: Hash[String, parsekit.JsObject],
+    obj: Hash[String, parsekit.JsObject])
+{
+    var obj_name = obj["name"].as_string()
+    var obj_type = render_linked_type(state, obj["type"].as_hash())
+    var ref_name = "var." ++ obj_name
+    var obj_doc = render_doc(obj["doc"], ref_name)
+
+    state.push(
+    "<h3 id='var.{0}'><code>var <a href='#var.{0}'>{0}</a>: {1}</code></h3>"
+    .format(obj_name, obj_type))
+    state.push(
+    "<div class='doc'>" ++ obj_doc ++ "</div>")
+}
+
+define write_function(
+    state: ModuleDocState,
+    parent: Hash[String, parsekit.JsObject],
+    obj: Hash[String, parsekit.JsObject])
+{
+    var obj_name = obj["name"].as_string()
+    var arg_string = render_args(state, obj)
+    var note_list: List[String] = []
+    var qual = field_to_string(obj, "qualifier")
+    var ref_name = ""
+
+    if qual: {
+        if qual != "public":
+            note_list.push(qual)
+
+        ref_name = "method." ++ obj_name
+    else:
+        ref_name = "function." ++ obj_name
+    }
+
+    var obj_doc = render_doc(obj["doc"], ref_name)
+
+    if field_to_boolean(obj, "is_static"):
+        note_list.push("static")
+
+    if obj.has_key("is_ctor"): {
+        note_list[-1] = "constructor"
+        obj_name = "&lt;new&gt;"
+        ref_name = "method." ++ obj_name
+    }
+
+    var note = ""
+
+    if note_list.size():
+        note = " <i>" ++ note_list.join(", ") ++ "</i>"
+
+    state.push(
+    "<h3 id='{0}'><code>define <a href='#{0}'>{1}</a>{2}{3}</code></h3>"
+    .format(ref_name, obj_name, arg_string, note))
+    state.push(
+    "<div class='doc'>" ++ obj_doc ++ "</div>")
+}
+
+define gen_enum_file(
+    state: ModuleDocState,
+    enum_obj: Hash[String, parsekit.JsObject])
+{
+    var name = enum_obj["name"].as_string()
+    var generics = field_to_list(enum_obj, "generics")
+                    .map(|g| g.as_string() )
+                    .join(", ")
+    if generics:
+        generics = "[" ++ generics ++ "]"
+
+    var scope_str = ""
+    if enum_obj.has_key("is_scoped"):
+        scope_str = "scoped "
+
+    var doc = render_doc(enum_obj["doc"], "enum." ++ name)
+
+    state.push("<h1>Enum " ++ name ++ "</h1>")
+    state.push("<pre>" ++ scope_str ++ "enum " ++ name ++ generics ++ " {")
+    write_variants(state, enum_obj)
+    state.push("}</pre>")
+    state.push("<div class='doc'>" ++ doc ++ "</div>")
+    write_children(state, enum_obj, "functions", "Methods", write_function)
+}
+
+define gen_class_file(
+    state: ModuleDocState,
+    class_obj: Hash[String, parsekit.JsObject])
+{
+    var name = class_obj["name"].as_string()
+
+    state.push("<h1>Class " ++ name ++ "</h1>")
+
+    if class_obj.has_key("fields"): {
+        # Foreign classes have "fields" with their C fields.
+        # No generics or parent though.
+
+        state.push("<pre>(foreign) class " ++ name ++ " {")
+
+        # Omit the first, which is always LILY_FOREIGN_HEADER
+        field_to_list(class_obj, "fields")
+           .slice(1)
+           .each(|e| state.push("    " ++ e.as_string()) )
+
+        state.push("}</pre>")
+    elif class_obj.has_key("properties"):
+        # Native classes have "properties", even if it's empty.
+        # Might have generics and a parent too.
+
+        var parent = field_to_string(class_obj, "parent")
+        if parent:
+            parent = " < " ++ parent
+
+        var generics = field_to_list(class_obj, "generics")
+                        .map(|m| m.as_string() )
+                        .join(", ")
+
+        if generics:
+            generics = "[" ++ generics ++ "]"
+
+        state.push("<pre>class " ++ name ++ generics ++ parent ++ " {")
+        write_properties_from(state, class_obj)
+        state.push("}</pre>")
+    else:
+        # Only builtin classes make it here.
+        # So far, the only builtins that have a non-empty generics field are
+        # List and Hash.
+        # Function and Tuple take an arbitrary number of generics, which is
+        # noted in their documentation.
+        # The rest are flat types that don't use generics.
+        var generics = field_to_list(class_obj, "generics")
+                        .map(|m| m.as_string() )
+                        .join(", ")
+
+        if generics:
+            generics = "[" ++ generics ++ "]"
+
+        state.push("<pre>(builtin) class " ++ name ++ generics ++ " {  }</pre>")
+    }
+
+    var doc = render_doc(class_obj["doc"], "class." ++ name)
+
+    state.push("<div class='doc'>" ++ doc ++ "</div>")
+    write_children(state, class_obj, "functions", "Methods", write_function)
+}
+
+define write_shortdesc(
+    state: ModuleDocState,
+    obj: Hash[String, parsekit.JsObject])
+{
+    var obj_name = obj["name"].as_string()
+    var obj_doc = obj["doc"].as_string().split("\n\n")[0]
+                    |> render_one_doc_line
+    var kind = obj["kind"].as_string()
+
+    # Users know that these are classes, so write it down as a class.
+    if kind == "native" || kind == "foreign":
+        kind = "class"
+    # Modules get their own directory.
+    elif kind == "module":
+        kind = obj_name ++ "/" ++ kind
+
+    state.push("<tr>")
+    state.push(
+    "<td><a class='reflink' href='{0}.{1}.html'>{1}</a></td>"
+    .format(kind, obj_name))
+    state.push("<td>" ++ obj_doc ++ "</td>")
+    state.push("</tr>")
+}
+
+define write_shortdescs(
+    state: ModuleDocState,
+    root_obj: Hash[String, parsekit.JsObject])
+{
+    var class_entries: List[Hash[String, parsekit.JsObject]] = []
+    var enum_entries: List[Hash[String, parsekit.JsObject]] = []
+    var exception_entries: List[Hash[String, parsekit.JsObject]] = []
+    var module_entries = field_to_list(root_obj, "modules")
+                            .map(|m| m.as_hash() )
+
+    var containers = field_to_list(root_obj, "containers")
+
+    for i in 0...containers.size() - 1: {
+        var c = containers[i].as_hash()
+        var kind = c["kind"].as_string()
+
+        if kind == "enum": {
+            enum_entries.push(c)
+        else:
+            var name = c["name"].as_string()
+
+            # todo: Go through lineage to verify exceptions.
+            if name == "Exception" || name.ends_with("Error"):
+                exception_entries.push(c)
+            else:
+                class_entries.push(c)
+        }
+    }
+
+    var entry_list = [class_entries, enum_entries, exception_entries, module_entries]
+    var titles = ["Classes", "Enums", "Exceptions", "Modules"]
+
+    for i in 0...entry_list.size() - 1: {
+        var e = entry_list[i]
+
+        if e.size(): {
+            state.push("<h2>" ++ titles[i] ++ "</h2>")
+            state.push("<table><tbody>")
+
+            for i in 0...e.size() - 1:
+                write_shortdesc(state, e[i])
+
+            state.push("</tbody></table>")
+        }
+    }
+}
+
+define gen_module_file(state: ModuleDocState)
+{
+    var root_obj = state.root
+    var root_name = root_obj["name"].as_string()
+    var ref_name = "module." ++ root_name
+    var module_doc = render_doc(root_obj["doc"], ref_name)
+
+    state.push("<h1>Module " ++ root_name ++ "</h1>")
+    state.push("<div class='doc'>" ++ module_doc ++ "</div>")
+    write_shortdescs(state, root_obj)
+    write_children(state, root_obj, "functions", "Functions", write_function)
+    write_children(state, root_obj, "vars", "Vars", write_var)
+
+    mkdir.mkdir(state.base_dir)
+    state.generate_for(root_obj)
+
+    var containers = field_to_list(root_obj, "containers")
+
+    for i in 0...containers.size() - 1: {
+        var obj = containers[i].as_hash()
+        var kind = obj["kind"].as_string()
+        if kind == "enum":
+            gen_enum_file(state, obj)
+        else:
+            gen_class_file(state, obj)
+
+        state.generate_for(obj)
+    }
+
+    var modules = field_to_list(root_obj, "modules")
+
+    if modules.size(): {
+        var new_style = state.style_dir ++ "../"
+        var prefix = root_name ++ "."
+
+        for i in 0...modules.size() - 1: {
+            var m = modules[i].as_hash()
+            var new_base = state.base_dir ++ m["name"].as_string() ++ "/"
+
+            ModuleDocState(m, new_base, new_style, prefix)
+            |> gen_module_file
+        }
+    }
+}
+
+define start_docgen(
+    root_obj: Hash[String, parsekit.JsObject],
+    base_dir: String,
+    asset_dir: String)
+{
+    var module_dir = base_dir ++ root_obj["name"].as_string() ++ "/"
+    var state = ModuleDocState(root_obj, module_dir, "../", "")
+
+    state.load_decls()
+    mkdir.mkdir(base_dir)
+    gen_module_file(state)
+}
+
+var file_name = sys.argv[1]
+var base_dir = "output/"
+var p = parsekit.CSourceDriver(parsekit.EngineCore())
+
+match p.process_file(file_name): {
+    case Failure(f):
+        print("docgen: Processing error: {0}\n    from line {1}."
+                .format(f[0], f[1]))
+    case Success(root_obj):
+        var invoke_split_dir = sys.argv[0].split("/")
+
+        invoke_split_dir[-1] = ""
+
+        var asset_dir = invoke_split_dir.join("/")
+
+        start_docgen(root_obj.as_hash(), base_dir, asset_dir)
+}

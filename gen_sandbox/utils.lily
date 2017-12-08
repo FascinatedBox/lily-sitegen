@@ -1,0 +1,46 @@
+define read_all_from_file(path: String): String
+{
+    var f = File.open(path, "r")
+    var lines: List[String] = []
+
+    f.each_line(|l| l.encode().unwrap() |> lines.push )
+    f.close()
+
+    return lines.join("\n")
+}
+
+define template_transform(            input:      String,
+                          :page_title page_title: String,
+                          :page_nav   page_nav:   String,
+                          :page_body  page_body:  String): String
+{
+    return input.replace("{{{page.title}}}", page_title)
+                .replace("{{{page.nav}}}", page_nav)
+                .replace("{{{page.body}}}", page_body)
+}
+
+define stringify_sandbox_examples(examples: List[List[String]]): String
+{
+    for i in 0...examples.size() - 1: {
+        var e = examples[i]
+
+        examples[i] = [
+        """\
+        <div class="example" id="{0}">\
+        {1}\
+        </div>\
+        """.format(e[0], e[1].html_encode() )
+        ]
+    }
+
+    return examples.map(|e| e[0] ).join("\n")
+}
+
+define write_all_to_file(:path    path:    String,
+                         :content content: String)
+{
+    var f = File.open(path, "w")
+
+    f.print(content)
+    f.close()
+}
