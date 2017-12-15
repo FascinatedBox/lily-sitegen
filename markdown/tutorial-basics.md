@@ -123,6 +123,18 @@ The backslash-newline escape sequence lets the interpreter know to omit the
 newline of the current line and the leading whitespace (spaces and tabs) of the
 next line.
 
+#### Tuple
+
+A `Tuple` is similar to a `List`, except that `Tuple`s have a fixed size, but
+can types that don't have any similarity to each other. A `Tuple` begins with
+`<[` and ends with `]>`:
+
+```
+var record = <[1, "abc", [2]]>
+
+var t: Tuple[String, Integer] = <["asdf", 123]>
+```
+
 ### Keywords
 
 The following keywords have special meaning:
@@ -130,7 +142,7 @@ The following keywords have special meaning:
 ```
 break case class continue define do elif else enum except false __file__ for
 forward __function__ if import __line__ match private protected public raise
-return scoped self static true try unit var while 
+return scoped self static true try unit var while
 ```
 
 Some of these keywords are 'magic', in that they are replaced with a literal
@@ -154,7 +166,7 @@ Lily supports two kinds of comments:
    comment ]#
 ```
 
-#### <h3 id="Escapes">Escapes</h3>
+### Escape Codes
 
 `String`, `ByteString`, and `Byte` support the following escape sequences:
 
@@ -183,3 +195,57 @@ Lily supports two kinds of comments:
 * `\<newline>`: `ByteString` and `String` only. The newline of the current line
                 and the leading whitespace (`' '` or `'\t'`) will be omitted
                 from the literal.
+
+### Precedence
+
+Lily's precedence table, from lowest to highest:
+
+| Operator                | Description              |
+|-------------------------|--------------------------|
+| `= /= *= += -= <<= >>=` | Assign/compound assign   |
+| `||`                    | Logical or               |
+| `&&`                    | Logical and              |
+| `>= > < <= == !=`       | Comparison and equality  |
+| `++`                    | Concatenate              |
+| `|>`                    | Function pipe            |
+| `& | ^`                 | Bitwise and, or, xor     |
+| `<< >>`                 | Bitwise shifts           |
+| `+ -`                   | Plus, minus              |
+| `% * /`                 | Modulo, multiply, divide |
+
+Operations such as `x.y` member lookup and subscripts take over either the
+entire current value, or the right side of the current binary operation.
+
+### Operations
+
+Basic arithmatic operations (`+ - * /`) can be used for two `Double` values, or
+two `Integer` values, or when there is one `Double` and one `Integer` value. The
+result is a `Double` if either side is a `Double`, `Integer` otherwise.
+
+Other primitive operations (shifts, bitwise operations, and modulo) are only
+valid if both sides are `Integer`.
+
+Comparison operations (`>= > < <=`) are allowed on any two sets of `Integer`,
+`String`, or `Double`.
+
+Equality operations (`== !=`) are allowed on any two equivalent types. `List`,
+`Hash`, `Tuple`, and variants have their members compared against each other,
+so that `[1] == [1]` is `true`. All other classes (aside from primitives) go
+through reference (pointer) comparison so that `Dynamic(1) == Dynamic(1)` is
+`false`.
+
+### Interpolation
+
+The `++` operator, `String.format`, and `print` all make use of built-in
+interpolation. Interpolation works as follows:
+
+Primitive values such as `Integer`, `Double`, and `String` have their content
+written out.
+
+Built-in containers have their inner contents written out. `Hash` does not
+guarantee an ordering to the contents it writes out.
+
+Non-scoped variants print just their name and their contents. Scoped variants
+print out the enum name and a dot first.
+
+Classes ( `Dynamic` included ) print out their address.

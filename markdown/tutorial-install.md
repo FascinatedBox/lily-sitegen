@@ -20,7 +20,7 @@ make install
 ```
 
 The result of the above is an executable named `lily` and a library that your
-programs can link to named `liblily`. 
+programs can link to named `liblily`.
 
 ### Options
 

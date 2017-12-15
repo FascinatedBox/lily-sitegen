@@ -1,5 +1,6 @@
 import markdown
 import os
+import re
 import sys
 
 def read_all_to_list(path):
@@ -26,6 +27,18 @@ def template_transform(source, \
 
 template_body = read_all_to_string("gen_basic/template-basic.html")
 template_nav = read_all_to_list("template-nav.html")
+
+def fix_header(matchobj):
+    header_name = matchobj.group(1)
+    header_id = "-".join(header_name.lower().split(" "))
+    out = ""
+
+    if matchobj.group(0).startswith("<h3"):
+        out = "<h3 id='%s'>%s</h3>" % (header_id, header_name)
+    else:
+        out = "<h4 id='%s'>%s</h4>" % (header_id, header_name)
+
+    return out
 
 def run_transform_for(markdown_path):
     global template_body, template_nav
@@ -55,7 +68,11 @@ def run_transform_for(markdown_path):
     local_nav = "".join(local_nav).strip()
     page_body = "".join(markdown_body_list[1:])
     page_body = markdown.markdown(page_body, \
-                    extensions=["markdown.extensions.fenced_code"])
+                    extensions=["markdown.extensions.fenced_code",
+                                "markdown.extensions.tables"])
+
+    page_body = re.sub("<h3>(.+)</h3>", fix_header, page_body)
+    page_body = re.sub("<h4>(.+)</h4>", fix_header, page_body)
 
     output = template_transform(template_body, \
                                 page_title=page_title, \
