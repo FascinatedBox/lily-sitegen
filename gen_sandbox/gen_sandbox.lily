@@ -1,5 +1,7 @@
 import utils
 
+# These examples are synced to lily's test/verify_sandbox.lily examples.
+
 var sandbox_examples =
 [
     [
