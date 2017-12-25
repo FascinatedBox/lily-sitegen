@@ -8,3 +8,5 @@ if len(sys.argv) != 2 or \
 subprocess.call(["python", "./gen_basic/gen_basic.py"])
 subprocess.call(["lily", "./gen_sandbox/gen_sandbox.lily"])
 subprocess.call(["lily", "./gen_core/docgen.lily", sys.argv[1]])
+print("Generating api docs...")
+subprocess.call(["./gen_api/gen_api.sh"], shell=True)
