@@ -115,3 +115,35 @@ import "somedir/point"
 
 print(point.Point(10, 20).stringified())
 ```
+
+### Import paths
+
+The default import handler for Lily tries paths in the following order:
+
+```
+<current root>/<name>.lily
+<current root>/<name>.(so/dll)
+
+<current root>/packages/<name>/src/<name>.lily
+<current root>/packages/<name>/src/<name>.(so/dll)
+
+<original root>/packages/<name>/src/<name>.lily
+<original root>/packages/<name>/src/<name>.(so/dll)
+```
+
+The base directory of the first file loaded by Lily is considered the original
+root. As a root module, any import that spans from it uses the root module's
+base directory as a starting point.
+
+Suppose the above example had another file at `somedir/sibling.lily`. To load
+that module, both `first.lily` and `somedir/point.lily` would use
+`import somedir/sibling`. That's because the sibling module is another module
+inside of `first.lily`.
+
+Loading a module from a packages directory is different. The first module loaded
+from a packages directory is considered a root module, and its imports will be
+run relative to that new root.
+
+By making import run relative to a root directory, it's possible for
+`somedir/point.lily` to make use of other libraries installed in the packages
+directory at the same level that `first.lily` is installed at.
