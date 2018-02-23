@@ -486,7 +486,7 @@ class EngineCore {
         ClassSym("Byte", 0),
         ClassSym("ByteString", 0),
         ClassSym("Boolean", 0),
-        ClassSym("Coroutine", 1),
+        ClassSym("Coroutine", 2),
         ClassSym("Dynamic", 0),
         ClassSym("Function", -1),
         ClassSym("File", 0),
@@ -502,7 +502,7 @@ class EngineCore {
         ClassSym("ValueError", 0),
         ClassSym("IndexError", 0),
         ClassSym("DivisionByZeroError", 0),
-        ClassSym("AssertionError", 0),
+        ClassSym("Unit", 0),
         ClassSym("$1", 0),
         ClassSym("$2", 0)
     ]
