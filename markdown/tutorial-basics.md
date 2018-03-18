@@ -228,11 +228,19 @@ valid if both sides are `Integer`.
 Comparison operations (`>= > < <=`) are allowed on any two sets of `Integer`,
 `String`, or `Double`.
 
-Equality operations (`== !=`) are allowed on any two equivalent types. `List`,
-`Hash`, `Tuple`, and variants have their members compared against each other,
-so that `[1] == [1]` is `true`. All other classes (aside from primitives) go
-through reference (pointer) comparison so that `Dynamic(1) == Dynamic(1)` is
-`false`.
+### Comparison
+
+Equality operations (`== !=`) are allowed on any two equivalent types.
+
+Simple values like `Integer`, and `Double` are straightforward: They are equal
+only when they are the same value.
+
+`List`, `Tuple`, `Hash`, and variants use structural comparison. Since `List`
+uses structural comparison, `[1] == [1]` will always return `true`.
+
+All other containers and more interesting types use identity comparison.
+A comparison such as `Point2D(2, 4) == Point2D(2, 4)` will always return
+`false`, since each `Point2D` is a different instance.
 
 ### Interpolation
 
