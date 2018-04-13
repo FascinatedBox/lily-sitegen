@@ -256,4 +256,4 @@ guarantee an ordering to the contents it writes out.
 Non-scoped variants print just their name and their contents. Scoped variants
 print out the enum name and a dot first.
 
-Classes ( `Dynamic` included ) print out their address.
+Classes print out their address.

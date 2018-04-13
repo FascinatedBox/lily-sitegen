@@ -487,7 +487,6 @@ class EngineCore {
         ClassSym("ByteString", 0),
         ClassSym("Boolean", 0),
         ClassSym("Coroutine", 2),
-        ClassSym("Dynamic", 0),
         ClassSym("Function", -1),
         ClassSym("File", 0),
         ClassSym("List", 1),
@@ -1094,12 +1093,7 @@ class CSourceDriver(engine: EngineCore) {
 
         @scanner.next()
         if @scanner.current_is(Token.LeftBracket): {
-            if raw_class.name != "Dynamic":
-                @engine.parse_scope_generics(raw_obj)
-            else:
-                # Dynamic is the only class with a constructor, and the generics
-                # that it uses don't belong to the class.
-                @engine.parse_constructor()
+            @engine.parse_scope_generics(raw_obj)
         }
     }
 

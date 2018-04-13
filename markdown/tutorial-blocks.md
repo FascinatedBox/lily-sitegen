@@ -347,8 +347,3 @@ only class information.
 Another note is that in class matches, unlike enum matches, there must always be
 an `else` clause present. Even if it is empty, the `else` clause serves as a
 reminder that there are other potential captures to be dealt with.
-
-One other kind of match is a special match against `Dynamic`. The `Dynamic` type
-is unique in that it can contain any other type inside of it, so long as that
-type does not use generics. This allows `Dynamic` to match against any class,
-not just ones that inherit ( `Dynamic` doesn't allow inheritance anyway).
