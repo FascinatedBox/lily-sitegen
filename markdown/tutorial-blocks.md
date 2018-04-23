@@ -4,9 +4,9 @@ Lily's block syntax is a mixture of ideas from Python and C:
 
 * The condition passed to a block ends with `:`
 
-* By default, blocks allow a single expression.
+* The entire block must be enclosed in braces (instead of just the branches).
 
-* For multiple expressions, the entire block must be in braces
+* All blocks are required to have braces.
 
 In practice, it looks like this:
 
@@ -28,6 +28,9 @@ unambiguous.
 The style of using one brace for all branches was chosen to lessen the potential
 of dangling curly braces when adjusting branch arms to support multiple
 expressions.
+
+All blocks are required to have braces to make their starting and ending points
+unambiguous.
 
 ### Truthiness
 
@@ -71,8 +74,9 @@ Execute expression(s) while within a given range.
 ```
 var items = ["a", "b", "c"]
 
-for i in 0...items.size() - 1:
+for i in 0...items.size() - 1: {
     print("Item {0} is {1}.".format(i, items[i]))
+}
 
 # Result:
 # Item 0 is a.
@@ -96,8 +100,9 @@ of the type `Integer`.
 ```
 var items = ["a", "b", "c"]
 
-for i in items.size() - 1...0 by -1:
+for i in items.size() - 1...0 by -1: {
     print("Item {0} is {1}.".format(i, items[i]))
+}
 
 # Result:
 # Item 2 is c.
@@ -118,8 +123,9 @@ define return_counter: Integer {
     return out
 }
 
-for i in 0...return_counter():
+for i in 0...return_counter(): {
     print("i is {0}".format(i))
+}
 
 # Result:
 # i is 0
@@ -157,9 +163,9 @@ Similar to `while`, except that the body is always executed at least once:
 ```
 var i = 1
 
-do:
+do: {
     print(i)
-while i != 1
+} while i != 1
 ```
 
 `do` supports both `break` and `continue` for flow control.
@@ -176,10 +182,11 @@ A `try` block attempts to execute expression(s) within the `try` section. If any
 expression raises an exception, the `except` branches are tested.
 
 ```
-try:
+try: {
     1 / 0
 except DivisionByZeroError:
     print("Can't divide by zero.")
+}
 ```
 
 Similar to `if`, braces go around the entire block after the `try`'s colon:
@@ -197,12 +204,13 @@ Exception capture tests `except` blocks starting from the first one specified to
 the last. Furthermore, capture can specify an underlying class to trap:
 
 ```
-try:
+try: {
     raise ValueError("!!!")
 except Exception:
     print("This will be seen.")
 except ValueError:
     print("This is not possible.")
+}
 
 # Result:
 # This will be seen.
@@ -220,10 +228,11 @@ declared. The base `Exception` class provides the properties `traceback` and
 ```
 class MyError(message: String, var @code: Integer) < Exception(message) {}
 
-try:
+try: {
     raise MyError("Oh no", 100)
 except MyError as e:
     print("Caught custom error with code {0}, message '{1}'.".format(e.code, e.message))
+}
 
 # Result:
 # Caught custom error with code 100, message 'Oh no'.

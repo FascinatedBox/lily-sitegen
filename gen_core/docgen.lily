@@ -10,10 +10,11 @@ var template_body = utils.read_all_from_file("gen_core/template-core.html")
 define field_to_boolean(source: Hash[String, parsekit.JsObject], field: String)
     : Boolean
 {
-    try:
+    try: {
         return source[field].as_boolean()
     except KeyError:
         return false
+    }
 
     return false
 }
@@ -21,10 +22,11 @@ define field_to_boolean(source: Hash[String, parsekit.JsObject], field: String)
 define field_to_list(source: Hash[String, parsekit.JsObject], field: String)
     : List[parsekit.JsObject]
 {
-    try:
+    try: {
         return source[field].as_list()
     except KeyError:
         return []
+    }
 
     return []
 }
@@ -34,10 +36,11 @@ define field_to_string(
     field: String)
     : String
 {
-    try:
+    try: {
         return source[field].as_string()
     except KeyError:
         return ""
+    }
 
     return ""
 }
@@ -65,25 +68,30 @@ class ModuleDocState(
             var kind = c["kind"].as_string()
             var name = c["name"].as_string()
 
-            if kind != "enum":
+            if kind != "enum": {
                 @class_decls.push(name)
             else:
                 @enum_decls.push(name)
+            }
         }
     }
 
     public define has_class(name: String): Boolean {
-        for i in 0...@class_decls.size() - 1:
-            if @class_decls[i] == name:
+        for i in 0...@class_decls.size() - 1: {
+            if @class_decls[i] == name: {
                 return true
+            }
+        }
 
         return false
     }
 
     public define has_enum(name: String): Boolean {
-        for i in 0...@enum_decls.size() - 1:
-            if @enum_decls[i] == name:
+        for i in 0...@enum_decls.size() - 1: {
+            if @enum_decls[i] == name: {
                 return true
+            }
+        }
 
         return false
     }
@@ -96,8 +104,9 @@ class ModuleDocState(
         for i in 0...classes.size() - 1: {
             var c = classes[i].as_hash()
             var class_name = c["name"].as_string()
-            if class_name == name:
+            if class_name == name: {
                 return c
+            }
         }
 
         # todo: The parsekit base should verify parent lineage
@@ -113,8 +122,9 @@ class ModuleDocState(
 
         if kind != "module": {
             # Native or foreign shouldn't matter to documentation output.
-            if kind == "foreign" || kind == "native":
+            if kind == "foreign" || kind == "native": {
                 kind = "class"
+            }
 
             title = @root["name"].as_string() ++ "." ++ name
         else:
@@ -129,8 +139,9 @@ class ModuleDocState(
                 :page_nav "",
                 :page_body @lines.join("\n"))
 
-        if name == "core":
+        if name == "core": {
             content = content.replace("../../", "../")
+        }
 
         print("Generating {0}.".format(file_name))
         utils.write_all_to_file(file_name, content)
@@ -146,8 +157,9 @@ define run_each(
 {
     var entries = field_to_list(source, field)
 
-    for i in 0...entries.size() - 1:
+    for i in 0...entries.size() - 1: {
         entries[i].as_hash() |> fn
+    }
 }
 
 define render_plain_type(source: Hash[String, parsekit.JsObject])
@@ -162,10 +174,11 @@ define render_plain_type(source: Hash[String, parsekit.JsObject])
         var func_out = args[0]
         var inputs = args.slice(1, args.size()).join(", ")
 
-        if func_out != "Unit":
+        if func_out != "Unit": {
             func_out = " => " ++ func_out 
         else:
             func_out = ""
+        }
 
         out = out ++ "(" ++ inputs ++ func_out ++ ")"
     elif source.has_key("is_optarg"):
@@ -174,8 +187,9 @@ define render_plain_type(source: Hash[String, parsekit.JsObject])
         out = out ++ "[" ++ args.join(", ") ++ "]"
     }
 
-    if source.has_key("is_vararg"):
+    if source.has_key("is_vararg"): {
         out = out ++ "..."
+    }
 
     return out
 }
@@ -195,19 +209,21 @@ define render_linked_type(
     }
 
     var out = name
-    if state.has_class(out):
+    if state.has_class(out): {
         out = "<a href='class.{0}.html'>{0}</a>".format(name)
     elif state.has_enum(out):
         out = "<a href='enum.{0}.html'>{0}</a>".format(name)
+    }
 
     if name == "Function": {
         var func_out = args[0]
         var inputs = args.slice(1, args.size()).join(", ")
 
-        if func_out != "Unit":
+        if func_out != "Unit": {
             func_out = " => " ++ func_out 
         else:
             func_out = ""
+        }
 
         out = out ++ "(" ++ inputs ++ func_out ++ ")"
     elif source.has_key("is_optarg"):
@@ -216,8 +232,9 @@ define render_linked_type(
         out = out ++ "[" ++ args.join(", ") ++ "]"
     }
 
-    if source.has_key("is_vararg"):
+    if source.has_key("is_vararg"): {
         out = out ++ "..."
+    }
 
     return out
 }
@@ -232,16 +249,18 @@ define render_args(
     var start = 0
 
     if input.has_key("qualifier") &&
-       field_to_boolean(input, "is_static") == false:
+       field_to_boolean(input, "is_static") == false: {
         start = 1
+    }
 
     for i in start...args.size() - 1: {
         var arg = args[i].as_hash()
         var name = arg["name"].as_string()
         var type_string = render_linked_type(state, arg["type"].as_hash())
 
-        if arg.has_key("keyarg"):
+        if arg.has_key("keyarg"): {
             name = arg["keyarg"].as_string() ++ " " ++ name
+        }
 
         out.push(name ++ ": " ++ type_string)
     }
@@ -249,11 +268,13 @@ define render_args(
     var out_text = out.join(", ")
     var return_type = render_linked_type(state, input["output"].as_hash())
 
-    if out_text:
+    if out_text: {
         out_text = "(" ++ out_text ++ ")"
+    }
 
-    if return_type != "Unit":
+    if return_type != "Unit": {
         out_text = out_text ++ ": " ++ return_type
+    }
 
     return out_text
 }
@@ -265,10 +286,11 @@ define render_property(obj: Hash[String, parsekit.JsObject])
     var qual = obj["qualifier"].as_string()
     var type_str = render_plain_type(obj["type"].as_hash())
 
-    if qual == "public":
+    if qual == "public": {
         qual = ""
     else:
         qual = qual ++ " "
+    }
 
     return "    {0}var @{1}: {2}".format(qual, name, type_str)
 }
@@ -282,17 +304,19 @@ define write_properties_from(
     while 1: {
         var properties = field_to_list(class_obj, "properties")
 
-        for i in 0...properties.size() - 1:
+        for i in 0...properties.size() - 1: {
             properties[i].as_hash()
             |> render_property
             |> state.push
+        }
 
         var parent_name = field_to_string(class_obj, "parent")
 
         if parent_name: {
             if (is_top && properties.size()) ||
-                is_top == false:
+                is_top == false: {
                 state.push("")
+            }
 
             var parent_obj = state.find_class_obj(parent_name)
 
@@ -324,16 +348,19 @@ define write_variants(
                         )
                         .join(", ")
 
-        if variant.has_key("keyarg"):
+        if variant.has_key("keyarg"): {
             name = variant["keyarg"].as_string() ++ " " ++ name
+        }
 
-        if arg_str:
+        if arg_str: {
             arg_str = "(" ++ arg_str ++ ")"
+        }
 
         var out = "    {0}{1}".format(name, arg_str)
 
-        if i != last:
+        if i != last: {
             out = out ++ ","
+        }
 
         state.push(out)
     }
@@ -428,9 +455,10 @@ define render_one_doc_line(input_line: String): String
         }
     }
 
-    if in_backtick:
+    if in_backtick: {
         raise RenderError("Uneven number of quote marks in: {0}."
                 .format(input_line))
+    }
 
     input_line.slice(slice_start) |> out_cache.push
     return out_cache.join()
@@ -529,8 +557,9 @@ define write_children(
     if obj.has_key(field_name): {
         state.push("<h2>" ++ title ++ "</h2>")
         var child_list = field_to_list(obj, field_name)
-        for i in 0...child_list.size() - 1:
+        for i in 0...child_list.size() - 1: {
             fn(state, obj, child_list[i].as_hash())
+        }
     }
 }
 
@@ -563,8 +592,9 @@ define write_function(
     var ref_name = ""
 
     if qual: {
-        if qual != "public":
+        if qual != "public": {
             note_list.push(qual)
+        }
 
         ref_name = "method." ++ obj_name
     else:
@@ -573,8 +603,9 @@ define write_function(
 
     var obj_doc = render_doc(obj["doc"], ref_name)
 
-    if field_to_boolean(obj, "is_static"):
+    if field_to_boolean(obj, "is_static"): {
         note_list.push("static")
+    }
 
     if obj.has_key("is_ctor"): {
         note_list[-1] = "constructor"
@@ -584,8 +615,9 @@ define write_function(
 
     var note = ""
 
-    if note_list.size():
+    if note_list.size(): {
         note = " <i>" ++ note_list.join(", ") ++ "</i>"
+    }
 
     state.push(
     "<h3 id='{0}'><code>define <a href='#{0}'>{1}</a>{2}{3}</code></h3>"
@@ -602,12 +634,16 @@ define gen_enum_file(
     var generics = field_to_list(enum_obj, "generics")
                     .map(|g| g.as_string() )
                     .join(", ")
-    if generics:
+
+    if generics: {
         generics = "[" ++ generics ++ "]"
+    }
 
     var scope_str = ""
-    if enum_obj.has_key("is_scoped"):
+
+    if enum_obj.has_key("is_scoped"): {
         scope_str = "scoped "
+    }
 
     var doc = render_doc(enum_obj["doc"], "enum." ++ name)
 
@@ -644,15 +680,17 @@ define gen_class_file(
         # Might have generics and a parent too.
 
         var parent = field_to_string(class_obj, "parent")
-        if parent:
+        if parent: {
             parent = " < " ++ parent
+        }
 
         var generics = field_to_list(class_obj, "generics")
                         .map(|m| m.as_string() )
                         .join(", ")
 
-        if generics:
+        if generics: {
             generics = "[" ++ generics ++ "]"
+        }
 
         state.push("<pre>class " ++ name ++ generics ++ parent ++ " {")
         write_properties_from(state, class_obj)
@@ -668,8 +706,9 @@ define gen_class_file(
                         .map(|m| m.as_string() )
                         .join(", ")
 
-        if generics:
+        if generics: {
             generics = "[" ++ generics ++ "]"
+        }
 
         state.push("<pre>(builtin) class " ++ name ++ generics ++ " {  }</pre>")
     }
@@ -690,11 +729,12 @@ define write_shortdesc(
     var kind = obj["kind"].as_string()
 
     # Users know that these are classes, so write it down as a class.
-    if kind == "native" || kind == "foreign":
+    if kind == "native" || kind == "foreign": {
         kind = "class"
     # Modules get their own directory.
     elif kind == "module":
         kind = obj_name ++ "/" ++ kind
+    }
 
     state.push("<tr>")
     state.push(
@@ -726,10 +766,11 @@ define write_shortdescs(
             var name = c["name"].as_string()
 
             # todo: Go through lineage to verify exceptions.
-            if name == "Exception" || name.ends_with("Error"):
+            if name == "Exception" || name.ends_with("Error"): {
                 exception_entries.push(c)
             else:
                 class_entries.push(c)
+            }
         }
     }
 
@@ -743,8 +784,9 @@ define write_shortdescs(
             state.push("<h2>" ++ titles[i] ++ "</h2>")
             state.push("<table><tbody>")
 
-            for i in 0...e.size() - 1:
+            for i in 0...e.size() - 1: {
                 write_shortdesc(state, e[i])
+            }
 
             state.push("</tbody></table>")
         }
@@ -772,10 +814,11 @@ define gen_module_file(state: ModuleDocState)
     for i in 0...containers.size() - 1: {
         var obj = containers[i].as_hash()
         var kind = obj["kind"].as_string()
-        if kind == "enum":
+        if kind == "enum": {
             gen_enum_file(state, obj)
         else:
             gen_class_file(state, obj)
+        }
 
         state.generate_for(obj)
     }
@@ -818,6 +861,12 @@ match p.process_file(file_name): {
         print("docgen: Processing error: {0}\n    from line {1}."
                 .format(f[0], f[1]))
     case Success(root_obj):
+        try: {
+            base_dir = sys.argv[2]
+        except IndexError:
+            0
+        }
+
         var invoke_split_dir = sys.argv[0].split("/")
 
         invoke_split_dir[-1] = ""

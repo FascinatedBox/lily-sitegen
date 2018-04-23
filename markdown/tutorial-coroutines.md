@@ -13,8 +13,9 @@ and doesn't take extra arguments:
 ```
 define one_to_ten(co: Coroutine[Integer, Unit])
 {
-    for i in 1...10:
+    for i in 1...10: {
         co.yield(i)
+    }
 }
 
 var co = Coroutine.build(one_to_ten)
@@ -168,9 +169,11 @@ define range_cl(:start start: Integer,
                 :end end: Integer)
 {
     define range_fn(co: Coroutine[Integer, Unit]) {
-        if start < end:
-            for i in start...end:
+        if start < end: {
+            for i in start...end: {
                 co.yield(i)
+            }
+        }
     }
 
     return range_fn
@@ -192,8 +195,9 @@ values:
 ```
 define adder(co: Coroutine[Integer, Integer], source: List[Integer])
 {
-    for i in 0...source.size() - 1:
+    for i in 0...source.size() - 1: {
         co.yield(co.receive() + source[i])
+    }
 }
 
 var co = Coroutine.build_with_value(adder, [1, 2, 3])

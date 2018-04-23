@@ -48,14 +48,17 @@ scoped enum Token {
 
 var char_class = List.repeat(256, Token.Invalid)
 
-for i in 'a'.to_i()...'z'.to_i():
+for i in 'a'.to_i()...'z'.to_i(): {
     char_class[i] = Token.Word
+}
 
-for i in 'A'.to_i()...'Z'.to_i():
+for i in 'A'.to_i()...'Z'.to_i(): {
     char_class[i] = Token.Word
+}
 
-for i in '0'.to_i()...'9'.to_i():
+for i in '0'.to_i()...'9'.to_i(): {
     char_class[i] = Token.Digit
+}
 
 char_class['@'.to_i()] = Token.PropWord
 char_class['_'.to_i()] = Token.Word
@@ -100,8 +103,9 @@ class EngineScanner
         var start = @source_pos
 
         if @source_bytes[@source_pos + 1] != '#' ||
-           @source_bytes[@source_pos + 2] != '#':
+           @source_bytes[@source_pos + 2] != '#': {
             raise ParseError("Docblocks must start with '###'.")
+        }
 
         @source_pos += 2
 
@@ -120,8 +124,9 @@ class EngineScanner
 
                 while 1: {
                     ch = local_bytes[local_pos]
-                    if ch != ' ' && ch != '\t':
+                    if ch != ' ' && ch != '\t': {
                         break
+                    }
 
                     local_pos += 1
                 }
@@ -256,8 +261,9 @@ class EngineScanner
 
                     result_str = @source.slice(start, @source_pos)
 
-                    if result_str == "":
+                    if result_str == "": {
                         result_tok = Token.Invalid
+                    }
                 case Token.Minus:
                     var start = @source_pos
                     @source_pos += 1
@@ -292,9 +298,10 @@ class EngineScanner
                 case Token.DollarSign:
                     ch = @source_bytes[@source_pos + 1]
 
-                    if ch != '1' && ch != '2':
+                    if ch != '1' && ch != '2': {
                         raise ParseError(
                                 "Invalid '$' marker, expected either $1 or $2.")
+                    }
 
                     @source_pos += 2
 
@@ -349,8 +356,9 @@ class EngineScanner
         if @last_tok != tok: {
             var got = "{0}".format(@last_tok)
 
-            if @last_tok == Token.Word:
+            if @last_tok == Token.Word: {
                 got = "'{0}'".format(@last_tok)
+            }
 
             raise ParseError("Expected {0}, not {1}.".format(tok, got))
         }
@@ -358,9 +366,10 @@ class EngineScanner
 
     public define expect_word(value: *String=""): String {
         if @last_tok != Token.Word ||
-            (value != "" && @last_str != value):
+            (value != "" && @last_str != value): {
             raise ParseError(
                     "Expected '{0}', not '{1}.".format(value, @last_tok))
+        }
 
         return @last_str
     }
@@ -606,8 +615,9 @@ class EngineCore {
         var class_name = @scanner.current_str()
         var entry = find_class(class_name)
 
-        if entry.is_none():
+        if entry.is_none(): {
             raise ParseError("Class '{0}' does not exist.".format(class_name))
+        }
 
         var raw_class = entry.unwrap()
         var args: List[JsObject] = []
@@ -689,10 +699,11 @@ class EngineCore {
         while 1: {
             var generic_word = @scanner.require(Token.Word)
 
-            if generic_word != @full_generic_names[index]:
+            if generic_word != @full_generic_names[index]: {
                 raise ParseError("Expected generic {0}, but got {1}."
                         .format(@full_generic_names[index],
                                 generic_word))
+            }
 
             index += 1
             @scanner.next()
@@ -741,8 +752,9 @@ class EngineCore {
 
         var save_generics = @visible_generics
 
-        if @scanner.current_tok() == Token.LeftBracket:
+        if @scanner.current_tok() == Token.LeftBracket: {
             @visible_generics = parse_generics_from(@visible_generics.size())
+        }
 
         source["generics"] = @visible_generics.map(|x| x |> JsString) |> JsList
 
@@ -901,9 +913,10 @@ class CSourceDriver(engine: EngineCore) {
                     }
                 }
 
-                if found == false:
+                if found == false: {
                     raise BlockError(start - 1,
                     "Block has no blank dividing line.")
+                }
 
                 var command = @lines.slice(start, j + 1).join("\n")
                 var doc = @lines.slice(j, current).join("\n")
@@ -938,8 +951,9 @@ class CSourceDriver(engine: EngineCore) {
 
     private define get_scope_name: String {
         var name = @engine.scanner.require(Token.Word)
-        if @current_scope_name != "":
+        if @current_scope_name != "": {
             @engine.leave_scope()
+        }
 
         @current_scope_name = name
         return name
@@ -963,19 +977,21 @@ class CSourceDriver(engine: EngineCore) {
         while 1: {
             match @scanner.current_tok(): {
                 case Token.Word:
-                    if last_token == Token.Word:
+                    if last_token == Token.Word: {
                         entry = entry ++ " " ++ @scanner.current_str()
                     else:
                         entry = entry ++ @scanner.current_str()
+                    }
                 case Token.LeftBracket:
                     entry = entry ++ "["
                 case Token.RightBracket:
                     entry = entry ++ "]"
                 case Token.Multiply:
-                    if last_token == Token.Word:
+                    if last_token == Token.Word: {
                         entry = entry ++ " *"
                     else:
                         entry = entry ++ "*"
+                    }
                 case Token.Semicolon:
                     args.push((entry ++ ";") |> JsString)
 
@@ -1061,8 +1077,9 @@ class CSourceDriver(engine: EngineCore) {
 
         raw_class["kind"] = "foreign" |> JsString
 
-        if @scanner.next_is(Token.LeftParenth):
+        if @scanner.next_is(Token.LeftParenth): {
             @engine.parse_constructor()
+        }
 
         @scanner.expect(Token.LeftCurly)
         @scanner.require_word("layout")
@@ -1075,15 +1092,17 @@ class CSourceDriver(engine: EngineCore) {
     }
 
     private define cmd_builtin {
-        if @root_name != "builtin":
+        if @root_name != "builtin": {
             raise ParseError("'builtin' strictly for the builtin package.")
+        }
 
         @scanner.require_word("class")
         var name = get_scope_name()
 
         var boxed_class = @engine.find_class(name)
-        if boxed_class.is_none():
+        if boxed_class.is_none(): {
             raise ParseError("Builtin class {0} not found.".format(name))
+        }
 
         var raw_class = boxed_class.unwrap()
         var boxed_obj = @engine.new_scope(raw_class.name, "containers")
@@ -1105,12 +1124,14 @@ class CSourceDriver(engine: EngineCore) {
 
         raw_class["kind"] = "native" |> JsString
 
-        if @scanner.next_is(Token.LeftBracket):
+        if @scanner.next_is(Token.LeftBracket): {
             @engine.parse_scope_generics(raw_class)
+        }
 
         if @scanner.current_is(Token.LeftParenth) == false &&
-           @scanner.current_is(Token.LeftCurly):
+           @scanner.current_is(Token.LeftCurly): {
             @scanner.expect_any(Token.LeftParenth, Token.LeftCurly)
+        }
 
         @engine.parse_constructor()
 
@@ -1126,8 +1147,9 @@ class CSourceDriver(engine: EngineCore) {
     }
 
     private define cmd_enum(is_scoped: *Boolean = false) {
-        if is_scoped == true:
+        if is_scoped == true: {
             @scanner.require_word("enum")
+        }
 
         var name = get_scope_name()
 
@@ -1135,13 +1157,15 @@ class CSourceDriver(engine: EngineCore) {
 
         var raw_enum = boxed_enum.as_hash()
 
-        if is_scoped:
+        if is_scoped: {
             raw_enum["is_scoped"] = is_scoped |> JsBoolean
+        }
 
         raw_enum["kind"] = "enum" |> JsString
 
-        if @scanner.next_is(Token.LeftBracket):
+        if @scanner.next_is(Token.LeftBracket): {
             @engine.parse_scope_generics(raw_enum)
+        }
 
         @scanner.expect(Token.LeftCurly)
         @scanner.next()
@@ -1153,17 +1177,19 @@ class CSourceDriver(engine: EngineCore) {
 
             new_variant_hash["name"] = @scanner.expect_word() |> JsString
 
-            if @scanner.next_is(Token.LeftParenth):
+            if @scanner.next_is(Token.LeftParenth): {
                 new_variant_hash["args"] = @engine.parse_variant_args()
+            }
 
             variant_entry_list.push(new_variant_hash |> JsHash)
 
-            if @scanner.current_is(Token.Comma):
+            if @scanner.current_is(Token.Comma): {
                 @scanner.next()
             elif @scanner.current_is(Token.RightCurly):
                 break
             else:
                 @scanner.expect_any(Token.Comma, Token.RightCurly)
+            }
         }
 
         raw_enum["variants"] = variant_entry_list |> JsList
@@ -1202,8 +1228,9 @@ class CSourceDriver(engine: EngineCore) {
     }
 
     private define cmd_var {
-        if @current_scope_name != "root":
+        if @current_scope_name != "root": {
             leave_scope()
+        }
 
         var name = @scanner.require(Token.Word)
 
@@ -1219,8 +1246,9 @@ class CSourceDriver(engine: EngineCore) {
     }
 
     private define cmd_package_files {
-        if @root_name != "core":
+        if @root_name != "core": {
             raise ParseError("'PackageFiles' strictly for the core package.")
+        }
 
         var paths = @scanner.strify_to_end()
                             .split("\n")
@@ -1239,7 +1267,7 @@ class CSourceDriver(engine: EngineCore) {
     private define parse_block {
         var command = @scanner.require(Token.Word)
 
-        if command == "define":
+        if command == "define": {
             cmd_define()
         elif command == "foreign":
             cmd_foreign()
@@ -1265,14 +1293,16 @@ class CSourceDriver(engine: EngineCore) {
             cmd_package_files()
         else:
             raise ParseError("Unknown command '{0}'.".format(command))
+        }
 
         @scanner.expect(Token.EndOfFile)
     }
 
     private define read_blocks: Result[Tuple[String, Integer], JsObject] {
         try: {
-            while read_next():
+            while read_next(): {
                 parse_block()
+            }
         except ParseError as e:
             return Failure(<[e.message, @scanner.line_num]>)
         except BlockError as e:

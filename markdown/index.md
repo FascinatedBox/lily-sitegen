@@ -32,8 +32,9 @@ define rpn(input: String): Result[String, List[Integer]]
             case Some(number):
                 stack.push(number)
             case None:
-                if stack.size() < 2:
+                if stack.size() < 2: {
                     return Failure("Stack underflow.")
+                }
 
                 var right = stack.pop()
                 var left = stack.pop()

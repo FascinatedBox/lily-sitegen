@@ -8,10 +8,11 @@ used as a namespace for the symbols inside:
 
 define fib(n: Integer): Integer
 {
-    if n < 2:
+    if n < 2: {
         return n
     else:
         return fib(n - 1) + fib(n - 2)
+    }
 }
 
 # other.lily
